@@ -33,7 +33,8 @@ namespace PhoneNumbers.Test
             // check that bin -> Read -> Equals(original). PhoneMetadata.Equals walks every field
             // (including nested descs and number formats), so this is a real diff, not just a smoke
             // test that the bytes survive.
-            var fromXml = BuildMetadataFromXml.BuildPhoneMetadata("PhoneNumberMetadata.xml");
+            var fromXml = BuildMetadataFromXml.BuildPhoneMetadata(
+                "PhoneNumberMetadata.xml", typeof(TestBuildMetadataFromBin).Assembly);
 
             Assert.True(fromXml.Count > 200, "expected >200 regions");
 
@@ -55,6 +56,7 @@ namespace PhoneNumbers.Test
         {
             var fromXml = BuildMetadataFromXml.BuildPhoneMetadata(
                 "ShortNumberMetadata.xml",
+                typeof(TestBuildMetadataFromBin).Assembly,
                 isShortNumberMetadata: true);
 
             Assert.NotEmpty(fromXml);
@@ -77,6 +79,7 @@ namespace PhoneNumbers.Test
         {
             var fromXml = BuildMetadataFromXml.BuildPhoneMetadata(
                 "PhoneNumberAlternateFormats.xml",
+                typeof(TestBuildMetadataFromBin).Assembly,
                 isAlternateFormatsMetadata: true);
 
             Assert.NotEmpty(fromXml);

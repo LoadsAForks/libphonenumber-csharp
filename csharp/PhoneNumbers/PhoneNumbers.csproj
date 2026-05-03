@@ -30,7 +30,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\resources\*.xml" Exclude="..\..\resources\PhoneNumberMetadataForTesting.xml" />
+    <!--
+      XML metadata files are no longer embedded in the production library: the build pipeline
+      generates equivalent binary files (see BuildBinaryMetadata target below) and embeds those
+      under the "PhoneNumbers.metadata.*" namespace. The XML still lives in resources/ on disk
+      so the build tool and the test project can use it as input.
+    -->
     <EmbeddedResource Include="..\..\resources\timezones\map_data.txt" LinkBase="timezones" />
     <None Include="..\..\icon.png" Pack="true" PackagePath="" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />

@@ -32,6 +32,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      The test project embeds the XML metadata files used by tests that exercise
+      BuildMetadataFromXml directly (e.g. TestBuildMetadataFromBin, TestBuildMetadataFromXml).
+      The production library no longer ships XML; tests pass typeof(TestX).Assembly so the
+      resource resolver picks them up here instead.
+    -->
+    <EmbeddedResource Include="..\..\resources\PhoneNumberMetadata.xml" />
+    <EmbeddedResource Include="..\..\resources\ShortNumberMetadata.xml" />
+    <EmbeddedResource Include="..\..\resources\PhoneNumberAlternateFormats.xml" />
     <EmbeddedResource Include="..\..\resources\PhoneNumberMetadataForTesting.xml" />
     <EmbeddedResource Include="..\..\resources\test\geocoding\**" LinkBase="geocoding" />
     <EmbeddedResource Include="..\..\resources\test\testgeocoding.zip" />
