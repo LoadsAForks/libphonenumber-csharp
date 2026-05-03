@@ -42,9 +42,43 @@
     <EmbeddedResource Include="..\..\resources\ShortNumberMetadata.xml" />
     <EmbeddedResource Include="..\..\resources\PhoneNumberAlternateFormats.xml" />
     <EmbeddedResource Include="..\..\resources\PhoneNumberMetadataForTesting.xml" />
-    <EmbeddedResource Include="..\..\resources\test\geocoding\**" LinkBase="geocoding" />
-    <EmbeddedResource Include="..\..\resources\test\testgeocoding.zip" />
   </ItemGroup>
+
+  <!--
+    Build-only ProjectReference to MetadataBuilder so the geocoding-bin Target below can
+    invoke it. ReferenceOutputAssembly="false" keeps the tool DLL out of the test assembly's
+    references, just like in the production project.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType=""
+                      SkipGetTargetFrameworkProperties="true"
+                      UndefineProperties="TargetFramework" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <BinaryTestGeocodingDir>$(BaseIntermediateOutputPath)test-geocoding/</BinaryTestGeocodingDir>
+    <TestResourcesGeocodingDir>$(MSBuildThisFileDirectory)..\..\resources/test/geocoding/</TestResourcesGeocodingDir>
+  </PropertyGroup>
+
+  <Target Name="BuildTestGeocodingBins"
+          BeforeTargets="AssignTargetPaths"
+          Inputs="$(TestResourcesGeocodingDir)en/1.txt"
+          Outputs="$(BinaryTestGeocodingDir)en.1">
+    <MakeDir Directories="$(BinaryTestGeocodingDir)" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- geocoding &quot;$(TestResourcesGeocodingDir)&quot; &quot;$(BinaryTestGeocodingDir)&quot;"
+          ConsoleToMSBuild="true" />
+    <ItemGroup>
+      <_GeneratedTestGeocodingBin Include="$(BinaryTestGeocodingDir)*" />
+      <EmbeddedResource Include="@(_GeneratedTestGeocodingBin)"
+                        LogicalName="PhoneNumbers.Test.geocoding.%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CleanTestGeocoding" AfterTargets="Clean">
+    <RemoveDir Directories="$(BinaryTestGeocodingDir)" Condition="Exists('$(BinaryTestGeocodingDir)')" />
+  </Target>
 
   <ItemGroup>
     <Service Include="{82a7f48d-3b50-4b1e-b82e-3ada8210c358}" />

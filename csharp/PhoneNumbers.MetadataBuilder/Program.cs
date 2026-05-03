@@ -9,8 +9,10 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
 
 namespace PhoneNumbers.MetadataBuilder;
 
@@ -49,33 +51,116 @@ internal static class Program
         if (args.Length < 3)
         {
             Console.Error.WriteLine(
-                "Usage: PhoneNumbers.MetadataBuilder <kind> <input-xml-path> <output-dir>");
+                "Usage: PhoneNumbers.MetadataBuilder <kind> <input> <output-dir-or-file>");
             Console.Error.WriteLine(
-                "  kind: phone | short | alternate | test");
+                "  kind: phone | short | alternate | test         (XML metadata file -> per-region bins)");
+            Console.Error.WriteLine(
+                "        geocoding                                (geocoding/ tree -> per-(lang,cc) bins)");
+            Console.Error.WriteLine(
+                "        timezones                                (timezones/map_data.txt -> single bin)");
             return 2;
         }
 
         var kind = args[0];
-        var inputXml = args[1];
-        var outputDir = args[2];
-
-        if (!File.Exists(inputXml))
-            throw new FileNotFoundException($"Input XML not found: {inputXml}", inputXml);
-
-        Directory.CreateDirectory(outputDir);
+        var input = args[1];
+        var output = args[2];
 
         return kind switch
         {
-            "phone" => BuildPerRegion(inputXml, outputDir, PhoneMetadataPrefix,
+            "phone" => BuildPerRegion(input, output, PhoneMetadataPrefix,
                 isShortNumberMetadata: false, isAlternateFormatsMetadata: false),
-            "short" => BuildPerRegion(inputXml, outputDir, ShortMetadataPrefix,
+            "short" => BuildPerRegion(input, output, ShortMetadataPrefix,
                 isShortNumberMetadata: true, isAlternateFormatsMetadata: false),
-            "alternate" => BuildPerRegion(inputXml, outputDir, AlternateFormatsPrefix,
+            "alternate" => BuildPerRegion(input, output, AlternateFormatsPrefix,
                 isShortNumberMetadata: false, isAlternateFormatsMetadata: true),
-            "test" => BuildPerRegion(inputXml, outputDir, TestMetadataPrefix,
+            "test" => BuildPerRegion(input, output, TestMetadataPrefix,
                 isShortNumberMetadata: false, isAlternateFormatsMetadata: false),
+            "geocoding" => BuildGeocoding(input, output),
+            "timezones" => BuildTimezones(input, output),
             _ => UnknownKind(kind),
         };
+    }
+
+    /// <summary>
+    /// Walks an input directory tree shaped <c>&lt;inputDir&gt;/&lt;lang&gt;/&lt;countryCode&gt;.txt</c>
+    /// (the layout used by libphonenumber's geocoding/ and carrier/ trees) and emits one binary
+    /// file per (lang, countryCode) pair as <c>&lt;outputDir&gt;/&lt;lang&gt;.&lt;countryCode&gt;</c>.
+    /// </summary>
+    private static int BuildGeocoding(string inputDir, string outputDir)
+    {
+        if (!Directory.Exists(inputDir))
+            throw new DirectoryNotFoundException($"Input directory not found: {inputDir}");
+        Directory.CreateDirectory(outputDir);
+
+        var written = 0;
+        foreach (var langDir in Directory.EnumerateDirectories(inputDir))
+        {
+            var lang = Path.GetFileName(langDir);
+            foreach (var txtPath in Directory.EnumerateFiles(langDir, "*.txt"))
+            {
+                var countryCode = Path.GetFileNameWithoutExtension(txtPath);
+                var map = ParseAreaCodeText(txtPath);
+                var outPath = Path.Combine(outputDir, $"{lang}.{countryCode}");
+                using var fs = File.Create(outPath);
+                BuildPrefixMapFromBin.WriteAreaCodeMap(fs, map);
+                written++;
+            }
+        }
+        Console.Out.WriteLine($"PhoneNumbers.MetadataBuilder: wrote {written} geocoding bin file(s) to {outputDir}");
+        return 0;
+    }
+
+    /// <summary>
+    /// Converts <c>resources/timezones/map_data.txt</c> into a single binary file at the supplied
+    /// output path. The text format pairs a phone-number prefix with one or more IANA tz names
+    /// joined by '&amp;'; we split here and store the array directly so the runtime mapper doesn't
+    /// have to.
+    /// </summary>
+    private static int BuildTimezones(string inputFile, string outputFile)
+    {
+        if (!File.Exists(inputFile))
+            throw new FileNotFoundException($"Input file not found: {inputFile}", inputFile);
+        Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
+
+        var map = ParseTimezoneText(inputFile, splitter: '&');
+        using var fs = File.Create(outputFile);
+        BuildPrefixMapFromBin.WriteTimezoneMap(fs, map);
+        Console.Out.WriteLine($"PhoneNumbers.MetadataBuilder: wrote {map.Count} timezone entries to {outputFile}");
+        return 0;
+    }
+
+    private static SortedDictionary<int, string> ParseAreaCodeText(string path)
+    {
+        var map = new SortedDictionary<int, string>();
+        using var reader = new StreamReader(path, Encoding.UTF8);
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            line = line.Trim();
+            if (line.Length == 0 || line[0] == '#') continue;
+            var pipe = line.IndexOf('|');
+            if (pipe < 0) continue;
+            var prefix = int.Parse(line.AsSpan(0, pipe), CultureInfo.InvariantCulture);
+            map[prefix] = line.Substring(pipe + 1);
+        }
+        return map;
+    }
+
+    private static SortedDictionary<long, string[]> ParseTimezoneText(string path, char splitter)
+    {
+        var map = new SortedDictionary<long, string[]>();
+        using var reader = new StreamReader(path, Encoding.UTF8);
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            line = line.Trim();
+            if (line.Length == 0 || line[0] == '#') continue;
+            var pipe = line.IndexOf('|');
+            if (pipe < 0) continue;
+            var prefix = long.Parse(line.AsSpan(0, pipe), CultureInfo.InvariantCulture);
+            map[prefix] = line.Substring(pipe + 1).Split(splitter, StringSplitOptions.RemoveEmptyEntries);
+        }
+        return map;
     }
 
     private static int UnknownKind(string kind)

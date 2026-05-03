@@ -31,22 +31,15 @@
 
   <ItemGroup>
     <!--
-      XML metadata files are no longer embedded in the production library: the build pipeline
-      generates equivalent binary files (see BuildBinaryMetadata target below) and embeds those
-      under the "PhoneNumbers.metadata.*" namespace. The XML still lives in resources/ on disk
-      so the build tool and the test project can use it as input.
+      XML metadata, geocoding text trees, and the timezones map_data.txt are all no longer
+      embedded directly: the build pipeline generates equivalent binary files (see the
+      BuildBinaryMetadata, BuildGeocodingBins, and BuildTimezoneBin targets below) and embeds
+      those under the "PhoneNumbers.metadata.*", "PhoneNumbers.geocoding.*", and
+      "PhoneNumbers.timezones.*" namespaces respectively. The text/xml originals still live in
+      resources/ on disk so the build tool and the test project can use them as input.
     -->
-    <EmbeddedResource Include="..\..\resources\timezones\map_data.txt" LinkBase="timezones" />
     <None Include="..\..\icon.png" Pack="true" PackagePath="" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-  </ItemGroup>
-
-  <ItemGroup Condition="!Exists('..\..\resources\geocoding.zip')">
-    <EmbeddedResource Include="..\..\resources\geocoding\**" LinkBase="geocoding" />
-  </ItemGroup>
-
-  <ItemGroup Condition="Exists('..\..\resources\geocoding.zip')">
-    <EmbeddedResource Include="..\..\resources\geocoding.zip" />
   </ItemGroup>
 
   <!--
@@ -66,7 +59,9 @@
   <PropertyGroup>
     <!-- Bin output is platform/TFM-agnostic; share across all TFMs to avoid redundant builds. -->
     <BinaryMetadataDir>$(BaseIntermediateOutputPath)metadata\</BinaryMetadataDir>
-    <ResourcesDir>$(MSBuildThisFileDirectory)..\..\resources\</ResourcesDir>
+    <BinaryGeocodingDir>$(BaseIntermediateOutputPath)geocoding\</BinaryGeocodingDir>
+    <BinaryTimezonesDir>$(BaseIntermediateOutputPath)timezones\</BinaryTimezonesDir>
+    <ResourcesDir>$(MSBuildThisFileDirectory)..\..\resources/</ResourcesDir>
   </PropertyGroup>
 
   <Target Name="BuildBinaryMetadata"
@@ -99,9 +94,44 @@
     </ItemGroup>
   </Target>
 
+  <Target Name="BuildGeocodingBins"
+          BeforeTargets="AssignTargetPaths"
+          Inputs="$(ResourcesDir)geocoding/en/1.txt"
+          Outputs="$(BinaryGeocodingDir)en.1">
+    <!--
+      Geocoding text files in resources/geocoding/<lang>/<countryCode>.txt are converted to
+      per-(lang, countryCode) binary files in $(BinaryGeocodingDir). The Inputs/Outputs sentinel
+      tracks just the most-likely-to-change file (English NANPA) — the tool always processes the
+      whole tree, so a fine-grained dependency list buys us nothing.
+    -->
+    <MakeDir Directories="$(BinaryGeocodingDir)" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- geocoding &quot;$(ResourcesDir)geocoding/&quot; &quot;$(BinaryGeocodingDir)&quot;"
+          ConsoleToMSBuild="true" />
+    <ItemGroup>
+      <_GeneratedGeocodingBin Include="$(BinaryGeocodingDir)*" />
+      <EmbeddedResource Include="@(_GeneratedGeocodingBin)"
+                        LogicalName="PhoneNumbers.geocoding.%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="BuildTimezoneBin"
+          BeforeTargets="AssignTargetPaths"
+          Inputs="$(ResourcesDir)timezones/map_data.txt"
+          Outputs="$(BinaryTimezonesDir)map_data.bin">
+    <MakeDir Directories="$(BinaryTimezonesDir)" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- timezones &quot;$(ResourcesDir)timezones/map_data.txt&quot; &quot;$(BinaryTimezonesDir)map_data.bin&quot;"
+          ConsoleToMSBuild="true" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(BinaryTimezonesDir)map_data.bin"
+                        LogicalName="PhoneNumbers.timezones.map_data.bin" />
+    </ItemGroup>
+  </Target>
+
   <!-- Make the generated files visible to clean. -->
   <Target Name="CleanBinaryMetadata" AfterTargets="Clean">
     <RemoveDir Directories="$(BinaryMetadataDir)" Condition="Exists('$(BinaryMetadataDir)')" />
+    <RemoveDir Directories="$(BinaryGeocodingDir)" Condition="Exists('$(BinaryGeocodingDir)')" />
+    <RemoveDir Directories="$(BinaryTimezonesDir)" Condition="Exists('$(BinaryTimezonesDir)')" />
   </Target>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' ">
