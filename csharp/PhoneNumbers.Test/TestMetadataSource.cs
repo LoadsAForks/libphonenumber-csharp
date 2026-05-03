@@ -86,6 +86,21 @@ namespace PhoneNumbers.Test
         }
 
         [Fact]
+        public void DefaultLoaderResolvesEmbeddedBinaryMetadata()
+        {
+            // Smoke test: the build pipeline produces .bin files and embeds them under
+            // "PhoneNumbers.metadata.*". This test catches a mismatch between the LogicalName
+            // chosen by the MSBuild target and the suffix-matching done by
+            // EmbeddedResourceMetadataLoader, which would silently break production lookups.
+            var loader = new EmbeddedResourceMetadataLoader();
+            var source = new MetadataSource(loader, "PhoneNumberMetadata");
+            var us = source.GetMetadataForRegion("US");
+            Assert.NotNull(us);
+            Assert.Equal("US", us!.Id);
+            Assert.Equal(1, us.CountryCode);
+        }
+
+        [Fact]
         public void RegionAndNonGeoCachesAreIndependent()
         {
             // Sanity check that the two caches don't accidentally collide on similar keys.

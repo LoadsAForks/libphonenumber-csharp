@@ -44,6 +44,59 @@
     <EmbeddedResource Include="..\..\resources\geocoding.zip" />
   </ItemGroup>
 
+  <!--
+    Build-only ProjectReference: forces MetadataBuilder to be built before this project (so the
+    Target below can invoke it), but does not pull MetadataBuilder.dll into PhoneNumbers' compile
+    references or output. MetadataBuilder source-links the few files it needs from this project,
+    so there's no circular dependency.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Bin output is platform/TFM-agnostic; share across all TFMs to avoid redundant builds. -->
+    <BinaryMetadataDir>$(BaseIntermediateOutputPath)metadata\</BinaryMetadataDir>
+    <ResourcesDir>$(MSBuildThisFileDirectory)..\..\resources\</ResourcesDir>
+  </PropertyGroup>
+
+  <Target Name="BuildBinaryMetadata"
+          BeforeTargets="AssignTargetPaths"
+          Inputs="$(ResourcesDir)PhoneNumberMetadata.xml;$(ResourcesDir)ShortNumberMetadata.xml;$(ResourcesDir)PhoneNumberAlternateFormats.xml"
+          Outputs="$(BinaryMetadataDir)PhoneNumberMetadata_US;$(BinaryMetadataDir)ShortNumberMetadata_US;$(BinaryMetadataDir)PhoneNumberAlternateFormats_49">
+    <!--
+      Inputs/Outputs gives us incremental builds: this target re-runs only when an XML file is
+      newer than the sentinel bin files. We pick three known-stable region/CC keys as the sentinel
+      since enumerating all ~540 outputs would bloat the project file and isn't necessary —
+      MetadataBuilder is all-or-nothing.
+    -->
+    <MakeDir Directories="$(BinaryMetadataDir)" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- phone &quot;$(ResourcesDir)PhoneNumberMetadata.xml&quot; &quot;$(BinaryMetadataDir)&quot;"
+          ConsoleToMSBuild="true" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- short &quot;$(ResourcesDir)ShortNumberMetadata.xml&quot; &quot;$(BinaryMetadataDir)&quot;"
+          ConsoleToMSBuild="true" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- alternate &quot;$(ResourcesDir)PhoneNumberAlternateFormats.xml&quot; &quot;$(BinaryMetadataDir)&quot;"
+          ConsoleToMSBuild="true" />
+
+    <!--
+      Embed the generated bin files as manifest resources under the "metadata" namespace prefix.
+      The runtime EmbeddedResourceMetadataLoader does suffix-matching, so the LogicalName here is
+      the contract: <prefix>_<region-or-cc>.
+    -->
+    <ItemGroup>
+      <_GeneratedMetadataBin Include="$(BinaryMetadataDir)*" />
+      <EmbeddedResource Include="@(_GeneratedMetadataBin)"
+                        LogicalName="PhoneNumbers.metadata.%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Make the generated files visible to clean. -->
+  <Target Name="CleanBinaryMetadata" AfterTargets="Clean">
+    <RemoveDir Directories="$(BinaryMetadataDir)" Condition="Exists('$(BinaryMetadataDir)')" />
+  </Target>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' ">
     <PackageReference Include="System.Collections.Immutable" Version="8.0.0" />
     <PackageReference Include="System.IO.Compression" Version="4.3.0" />
