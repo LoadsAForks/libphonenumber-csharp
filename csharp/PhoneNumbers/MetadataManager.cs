@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2012 The Libphonenumber Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,40 +14,34 @@
  * limitations under the License.
  */
 
-using System.Collections.Generic;
-using System.Linq;
-
 namespace PhoneNumbers
 {
     /// <summary>
-    /// Class encapsulating loading of PhoneNumber Metadata information. Currently this is used only for
-    /// additional data files such as PhoneNumberAlternateFormats, but in the future it is envisaged it
-    /// would handle the main metadata file (PhoneNumberMetadata.xml) as well.
+    /// Class encapsulating loading of PhoneNumber Metadata information for the supplementary data
+    /// files: <c>PhoneNumberAlternateFormats</c> (per country calling code) and
+    /// <c>ShortNumberMetadata</c> (per region).
     /// </summary>
-    /// <remarks>Author: Lara Rennie</remarks>
+    /// <remarks>
+    /// Switched from eager XML parsing to lazy binary loading via <see cref="MetadataSource"/>:
+    /// callers only pay the cost of a region's metadata when they ask for it, and metadata is
+    /// served from the build-time-generated binary files embedded in the assembly rather than the
+    /// XML files. <para/>
+    /// Author: Lara Rennie
+    /// </remarks>
     public static class MetadataManager
     {
-        private static class AlternateFormats
-        {
-            public static readonly Dictionary<int, PhoneMetadata> Map =
-                BuildMetadataFromXml.BuildPhoneMetadata("PhoneNumberAlternateFormats.xml", isAlternateFormatsMetadata: true).ToDictionary(m => m.CountryCode);
-        }
+        private static readonly MetadataSource AlternateFormatsSource =
+            new(new EmbeddedResourceMetadataLoader(), "PhoneNumberAlternateFormats");
 
-        private static class ShortNumber
-        {
-            // A mapping from a region code to the short number metadata for that region code.
-            public static readonly Dictionary<string, PhoneMetadata> MetadataMap =
-                BuildMetadataFromXml.BuildPhoneMetadata("ShortNumberMetadata.xml", isShortNumberMetadata: true).ToDictionary(m => m.Id);
-        }
+        private static readonly MetadataSource ShortNumberSource =
+            new(new EmbeddedResourceMetadataLoader(), "ShortNumberMetadata");
 
 #if NET6_0_OR_GREATER
         public static PhoneMetadata? GetAlternateFormatsForCountry(int countryCallingCode)
 #else
         public static PhoneMetadata GetAlternateFormatsForCountry(int countryCallingCode)
 #endif
-        {
-            return AlternateFormats.Map.TryGetValue(countryCallingCode, out var metadata) ? metadata : null;
-        }
+            => AlternateFormatsSource.GetMetadataForNonGeographicalRegion(countryCallingCode);
 
 #if NET6_0_OR_GREATER
         internal static PhoneMetadata? GetShortNumberMetadataForRegion(string regionCode)
@@ -57,7 +51,7 @@ namespace PhoneNumbers
         {
             if (!ShortNumbersRegionCodeSet.RegionCodeSet.Contains(regionCode))
                 return null;
-            return ShortNumber.MetadataMap.TryGetValue(regionCode, out var metadata) ? metadata : null;
+            return ShortNumberSource.GetMetadataForRegion(regionCode);
         }
     }
 }

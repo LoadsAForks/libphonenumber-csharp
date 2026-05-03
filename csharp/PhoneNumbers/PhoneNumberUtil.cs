@@ -355,14 +355,19 @@ namespace PhoneNumbers
 
         private static PhoneNumberUtil instance;
 
-        // A mapping from a region code to the PhoneMetadata for that region.
-        private readonly Dictionary<string, PhoneMetadata> regionToMetadataMap;
+        // Lazy, cached resolver for region metadata + non-geographical-entity metadata. Replaces
+        // the eager dictionaries that used to be populated at construction by parsing the entire
+        // XML file: now we resolve a region's metadata only when first asked for it. Both the
+        // production path (binary-encoded embedded resources) and the legacy XML-stream path go
+        // through the same MetadataSource — see the constructors below.
+        private readonly MetadataSource phoneMetadataSource;
 
-        // A mapping from a country calling code for a non-geographical entity to the PhoneMetadata for
-        // that country calling code. Examples of the country calling codes include 800 (International
-        // Toll Free Service) and 808 (International Shared Cost Service).
-        private readonly Dictionary<int, PhoneMetadata> countryCodeToNonGeographicalMetadataMap =
-            new Dictionary<int, PhoneMetadata>();
+        // Set of country calling codes that map exclusively to non-geographical entities (e.g. 800
+        // for International Toll Free Service, 808 for Shared Cost). Computed once from the
+        // country-code-to-region-code map at construction. Replaces the prior
+        // countryCodeToNonGeographicalMetadataMap.Keys, which incorrectly included every country
+        // calling code seen during eager metadata loading rather than just non-geo entries.
+        private readonly HashSet<int> nonGeoCallingCodes;
 
         public const string REGION_CODE_FOR_NON_GEO_ENTITY = "001";
 
@@ -504,31 +509,81 @@ namespace PhoneNumbers
         {
         }
 
-        internal PhoneNumberUtil(Stream metaDataStream,  Dictionary<int, List<string>> countryCallingCodeToRegionCodeMap = null)
+        // Legacy stream-based constructor: parses XML eagerly (preserved for tests and consumers
+        // who load custom XML metadata). The parsed metadata is round-tripped through
+        // BuildMetadataFromBin once so the rest of the class can use the unified MetadataSource
+        // path; the cost is O(metadata size) at construction, which is acceptable since this
+        // constructor is not on a hot path.
+        internal PhoneNumberUtil(Stream metaDataStream, Dictionary<int, List<string>> countryCallingCodeToRegionCodeMap = null)
         {
             var phoneMetadata = BuildMetadataFromXml.BuildPhoneMetadataFromStream(metaDataStream);
-            this.countryCallingCodeToRegionCodeMap = countryCallingCodeToRegionCodeMap ??=
+            countryCallingCodeToRegionCodeMap ??=
                 BuildMetadataFromXml.BuildCountryCodeToRegionCodeMap(phoneMetadata);
 
-#if NET6_0_OR_GREATER
-            supportedRegions = new HashSet<string>(280); // currently 245 items
-#else
-            supportedRegions = new HashSet<string>();
-#endif
-            foreach (var regionCodes in countryCallingCodeToRegionCodeMap)
-                supportedRegions.UnionWith(regionCodes.Value);
-            supportedRegions.Remove(REGION_CODE_FOR_NON_GEO_ENTITY);
-
-            nanpaRegions = countryCallingCodeToRegionCodeMap.TryGetValue(NANPA_COUNTRY_CODE, out var regions) ? new(regions) : new();
-
-            regionToMetadataMap = new Dictionary<string, PhoneMetadata>(280); // currently 245 items
+            var inMemory = new Dictionary<string, byte[]>(phoneMetadata.Count);
             foreach (var m in phoneMetadata)
             {
-                countryCodeToNonGeographicalMetadataMap[m.CountryCode] = m;
-                regionToMetadataMap[m.Id] = m;
+                using var ms = new MemoryStream();
+                BuildMetadataFromBin.WriteMetadata(ms, m);
+                inMemory[$"PhoneNumberMetadata_{MetadataKey(m)}"] = ms.ToArray();
             }
-            regionToMetadataMap.Remove(REGION_CODE_FOR_NON_GEO_ENTITY);
+            Initialize(new InMemoryMetadataLoader(inMemory), countryCallingCodeToRegionCodeMap,
+                out this.countryCallingCodeToRegionCodeMap, out supportedRegions, out nanpaRegions,
+                out nonGeoCallingCodes, out phoneMetadataSource);
         }
+
+        // Production constructor: lazy per-region loading via the supplied IMetadataLoader. The
+        // country-calling-code-to-region map is required up front since we no longer load every
+        // region's metadata eagerly to compute it.
+        internal PhoneNumberUtil(IMetadataLoader metadataLoader,
+            Dictionary<int, List<string>> countryCallingCodeToRegionCodeMap)
+        {
+            if (metadataLoader == null) throw new ArgumentNullException(nameof(metadataLoader));
+            if (countryCallingCodeToRegionCodeMap == null)
+                throw new ArgumentNullException(nameof(countryCallingCodeToRegionCodeMap));
+            Initialize(metadataLoader, countryCallingCodeToRegionCodeMap,
+                out this.countryCallingCodeToRegionCodeMap, out supportedRegions, out nanpaRegions,
+                out nonGeoCallingCodes, out phoneMetadataSource);
+        }
+
+        private static void Initialize(
+            IMetadataLoader loader,
+            Dictionary<int, List<string>> ccToRegions,
+            out Dictionary<int, List<string>> outMap,
+            out HashSet<string> outSupportedRegions,
+            out HashSet<string> outNanpaRegions,
+            out HashSet<int> outNonGeoCallingCodes,
+            out MetadataSource outSource)
+        {
+            outMap = ccToRegions;
+
+#if NET6_0_OR_GREATER
+            outSupportedRegions = new HashSet<string>(280); // currently 245 items
+            outNonGeoCallingCodes = new HashSet<int>(16);
+#else
+            outSupportedRegions = new HashSet<string>();
+            outNonGeoCallingCodes = new HashSet<int>();
+#endif
+            foreach (var entry in ccToRegions)
+            {
+                outSupportedRegions.UnionWith(entry.Value);
+                if (entry.Value.Contains(REGION_CODE_FOR_NON_GEO_ENTITY))
+                    outNonGeoCallingCodes.Add(entry.Key);
+            }
+            outSupportedRegions.Remove(REGION_CODE_FOR_NON_GEO_ENTITY);
+
+            outNanpaRegions = ccToRegions.TryGetValue(NANPA_COUNTRY_CODE, out var regions)
+                ? new HashSet<string>(regions) : new HashSet<string>();
+
+            outSource = new MetadataSource(loader, "PhoneNumberMetadata");
+        }
+
+        // Mirrors the file-naming convention emitted by PhoneNumbers.MetadataBuilder: region code
+        // for geographical entries, country calling code for non-geographical / id-less entries.
+        private static string MetadataKey(PhoneMetadata m)
+            => string.IsNullOrEmpty(m.Id) || m.Id == REGION_CODE_FOR_NON_GEO_ENTITY
+                ? m.CountryCode.ToString(CultureInfo.InvariantCulture)
+                : m.Id;
 
         /// <summary>
         /// Attempts to extract a possible number from the string passed in. This currently strips all
@@ -865,10 +920,17 @@ namespace PhoneNumbers
         /// Returns all global network calling codes the library has metadata for.
         /// </summary>
         /// <returns>An unordered set of the country calling codes for every non-geographical entity the
-        /// library supports.</returns>
-        public Dictionary<int, PhoneMetadata>.KeyCollection GetSupportedGlobalNetworkCallingCodes()
+        /// library supports (e.g. 800, 808, 870 for international toll-free / shared-cost / etc.).</returns>
+        /// <remarks>
+        /// The return type changed from <c>Dictionary&lt;int, PhoneMetadata&gt;.KeyCollection</c> to
+        /// <see cref="HashSet{T}"/> when metadata loading switched to the lazy MetadataSource —
+        /// the prior collection was a leak of an internal dictionary that incidentally contained
+        /// every loaded calling code (geographical and non-geographical), not just non-geo as
+        /// documented. Source-level callers using <c>foreach</c> or LINQ are unaffected.
+        /// </remarks>
+        public HashSet<int> GetSupportedGlobalNetworkCallingCodes()
         {
-            return countryCodeToNonGeographicalMetadataMap.Keys;
+            return nonGeoCallingCodes;
         }
 
         /// <summary>
@@ -983,7 +1045,14 @@ namespace PhoneNumbers
         /// </para>
         /// </summary>
         /// <returns>A <see cref="PhoneNumberUtil"/> instance.</returns>
-        public static PhoneNumberUtil GetInstance() => instance ?? GetInstance("PhoneNumberMetadata.xml");
+        public static PhoneNumberUtil GetInstance()
+        {
+            if (instance != null) return instance;
+            lock (ThisLock)
+                return instance ??= new PhoneNumberUtil(
+                    new EmbeddedResourceMetadataLoader(),
+                    CountryCodeToRegionCodeMap.GetCountryCodeToRegionCodeMap());
+        }
 
         /// <summary>
         /// Tests whether a phone number has a geographical association. It checks if the number is
@@ -1677,12 +1746,18 @@ namespace PhoneNumbers
 
         public PhoneMetadata GetMetadataForRegion(string regionCode)
         {
-            return regionCode != null && regionToMetadataMap.TryGetValue(regionCode, out var metadata) ? metadata : null;
+            if (regionCode == null) return null;
+            return phoneMetadataSource.GetMetadataForRegion(regionCode);
         }
 
         public PhoneMetadata GetMetadataForNonGeographicalRegion(int countryCallingCode)
         {
-            return countryCodeToNonGeographicalMetadataMap.TryGetValue(countryCallingCode, out var metadata) ? metadata : null;
+            // Guard against geographical calling codes — Java's NonGeographicalEntityMetadataSource
+            // does the same check via supportedCallingCodes(). Without this, looking up a
+            // geographical CC (e.g. 1 for NANPA) would incorrectly attempt to load metadata using
+            // the calling-code key.
+            if (!nonGeoCallingCodes.Contains(countryCallingCode)) return null;
+            return phoneMetadataSource.GetMetadataForNonGeographicalRegion(countryCallingCode);
         }
 
         private bool IsNumberMatchingDesc(string nationalNumber, PhoneNumberDesc numberDesc)

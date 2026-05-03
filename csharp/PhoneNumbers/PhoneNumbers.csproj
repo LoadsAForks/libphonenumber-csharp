@@ -53,7 +53,9 @@
   <ItemGroup>
     <ProjectReference Include="..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj"
                       ReferenceOutputAssembly="false"
-                      OutputItemType="" />
+                      OutputItemType=""
+                      SkipGetTargetFrameworkProperties="true"
+                      UndefineProperties="TargetFramework" />
   </ItemGroup>
 
   <PropertyGroup>

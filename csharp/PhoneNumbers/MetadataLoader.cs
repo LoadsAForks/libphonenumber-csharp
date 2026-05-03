@@ -1,3 +1,4 @@
+#nullable enable
 /*
  * Copyright (C) 2026 The Libphonenumber Authors
  *
@@ -28,6 +29,25 @@ namespace PhoneNumbers
         /// caller takes ownership and must dispose the returned stream.
         /// </summary>
         Stream? LoadMetadata(string fileName);
+    }
+
+    /// <summary>
+    /// In-memory <see cref="IMetadataLoader"/> backed by a dictionary of pre-serialized binary
+    /// metadata. Used by <see cref="PhoneNumberUtil"/>'s legacy Stream constructor: the parsed XML
+    /// is round-tripped through <see cref="BuildMetadataFromBin"/> once at construction so the
+    /// rest of the library can use the same lazy <c>MetadataSource</c> path as production code.
+    /// </summary>
+    internal sealed class InMemoryMetadataLoader : IMetadataLoader
+    {
+        private readonly System.Collections.Generic.Dictionary<string, byte[]> data;
+
+        public InMemoryMetadataLoader(System.Collections.Generic.Dictionary<string, byte[]> data)
+        {
+            this.data = data;
+        }
+
+        public Stream? LoadMetadata(string fileName)
+            => data.TryGetValue(fileName, out var bytes) ? new MemoryStream(bytes, writable: false) : null;
     }
 
     /// <summary>

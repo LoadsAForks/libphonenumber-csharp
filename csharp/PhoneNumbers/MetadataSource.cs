@@ -1,3 +1,4 @@
+#nullable enable
 /*
  * Copyright (C) 2026 The Libphonenumber Authors
  *
