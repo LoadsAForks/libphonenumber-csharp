@@ -1146,7 +1146,7 @@ namespace PhoneNumbers
                     // found in the input string. However, this doesn't result in a number we can dial. For this
                     // reason, we treat the empty string the same as if it isn't set at all.
                     formattedNumber = numberNoExt.PreferredDomesticCarrierCode.Length > 0
-                        ? formattedNumber = FormatNationalNumberWithPreferredCarrierCode(numberNoExt, "")
+                        ? FormatNationalNumberWithPreferredCarrierCode(numberNoExt, "")
                         // Brazilian fixed line and mobile numbers need to be dialed with a carrier code when
                         // called within Brazil. Without that, most of the carriers won't connect the call.
                         // Because of that, we return an empty string here.
@@ -1189,8 +1189,8 @@ namespace PhoneNumbers
                         // dialling successfully from mobile devices. As we do not have complete information on
                         // special codes and to be consistent with formatting across all phone types we return
                         // the number in international format here.
-                        || (regionCode == "MX" || regionCode == "CL"
-                            || regionCode == "UZ" && isFixedLineOrMobile)
+                        || ((regionCode == "MX" || regionCode == "CL"
+                                || regionCode == "UZ") && isFixedLineOrMobile)
                         && CanBeInternationallyDialled(numberNoExt))
                     {
                         formattedNumber = Format(numberNoExt, PhoneNumberFormat.INTERNATIONAL);
@@ -1230,7 +1230,8 @@ namespace PhoneNumbers
         /// <returns>The formatted phone number in its original number format.</returns>
         public string FormatInOriginalFormat(PhoneNumber number, string regionCallingFrom)
         {
-            if (number.HasRawInput && !HasFormattingPatternForNumber(number))
+            var formatRule = ChooseFormattingPatternForNumber(number);
+            if (number.HasRawInput && formatRule == null)
             {
                 // We check if we have the formatting pattern because without that, we might format the number
                 // as a group without national prefix.
@@ -1274,10 +1275,6 @@ namespace PhoneNumbers
                         formattedNumber = nationalFormat;
                         break;
                     }
-                    var metadata = GetMetadataForRegion(regionCode);
-                    var nationalNumber = GetNationalSignificantNumber(number);
-                    var formatRule =
-                        ChooseFormattingPatternForNumber(metadata.numberFormat_, nationalNumber);
                     // When the format we apply to this number doesn't contain national prefix, we can just
                     // return the national format.
                     // TODO: Refactor the code below with the code in isNationalPrefixPresentIfRequired.
@@ -1344,7 +1341,7 @@ namespace PhoneNumbers
             return false;
         }
 
-        private bool HasFormattingPatternForNumber(PhoneNumber number)
+        private NumberFormat ChooseFormattingPatternForNumber(PhoneNumber number)
         {
             var countryCallingCode = number.CountryCode;
             var phoneNumberRegion = GetRegionCodeForCountryCode(countryCallingCode);
@@ -1352,12 +1349,10 @@ namespace PhoneNumbers
                 GetMetadataForRegionOrCallingCode(countryCallingCode, phoneNumberRegion);
             if (metadata == null)
             {
-                return false;
+                return null;
             }
             var nationalNumber = GetNationalSignificantNumber(number);
-            var formatRule =
-                ChooseFormattingPatternForNumber(metadata.numberFormat_, nationalNumber);
-            return formatRule != null;
+            return ChooseFormattingPatternForNumber(metadata.numberFormat_, nationalNumber);
         }
 
         /// <summary>

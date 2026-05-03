@@ -408,22 +408,22 @@ namespace PhoneNumbers
                         : metadataForRegionCallingFrom.PreferredInternationalPrefix;
             }
 
-            var formattedNumber = new StringBuilder();
+            var formattedNumber = new StringBuilder(rawInput);
+            var regionCode = GetRegionCodeForCountryCode(countryCode);
+            var metadataForRegion = GetMetadataForRegionOrCallingCode(countryCode, regionCode);
+            // Strip any extension already present in the raw input before appending the formatted one.
+            MaybeStripExtension(formattedNumber, rawInput);
+            MaybeAppendFormattedExtension(number, metadataForRegion, PhoneNumberFormat.INTERNATIONAL, formattedNumber);
             if (internationalPrefixForFormatting.Length > 0)
             {
-                formattedNumber.Append(internationalPrefixForFormatting).Append(' ').Append(countryCode).Append(' ');
+                formattedNumber.Insert(0, ' ').Insert(0, countryCode).Insert(0, ' ').Insert(0, internationalPrefixForFormatting);
             }
             else
             {
                 // Invalid region entered as country-calling-from (so no metadata was found for it) or the
                 // region chosen has multiple international dialling prefixes.
-                formattedNumber.Append(PLUS_SIGN).Append(countryCode).Append(' ');
+                formattedNumber.Insert(0, ' ').Insert(0, countryCode).Insert(0, PLUS_SIGN);
             }
-
-            formattedNumber.Append(rawInput);
-            var regionCode = GetRegionCodeForCountryCode(countryCode);
-            var metadataForRegion = GetMetadataForRegionOrCallingCode(countryCode, regionCode);
-            MaybeAppendFormattedExtension(number, metadataForRegion, PhoneNumberFormat.INTERNATIONAL, formattedNumber);
             return formattedNumber.ToString();
         }
     }
