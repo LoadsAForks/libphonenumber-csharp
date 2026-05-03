@@ -50,35 +50,55 @@
     <EmbeddedResource Include="..\..\resources\PhoneNumberMetadataForTesting.xml" />
   </ItemGroup>
 
-  <!--
-    Build-only ProjectReference to MetadataBuilder so the geocoding-bin Target below can
-    invoke it. ReferenceOutputAssembly="false" keeps the tool DLL out of the test assembly's
-    references, just like in the production project.
-  -->
-  <ItemGroup>
-    <ProjectReference Include="..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj"
-                      ReferenceOutputAssembly="false"
-                      OutputItemType=""
-                      SkipGetTargetFrameworkProperties="true"
-                      UndefineProperties="TargetFramework" />
-  </ItemGroup>
-
   <PropertyGroup>
-    <BinaryTestGeocodingDir>$(BaseIntermediateOutputPath)test-geocoding/</BinaryTestGeocodingDir>
-    <TestResourcesGeocodingDir>$(MSBuildThisFileDirectory)..\..\resources/test/geocoding/</TestResourcesGeocodingDir>
+    <!--
+      No trailing separator (Windows shell would corrupt the path inside the Exec command — see
+      the matching note in PhoneNumbers.csproj). Trailing `/` is added explicitly on the glob.
+    -->
+    <BinaryTestGeocodingDir>$(BaseIntermediateOutputPath)test-geocoding</BinaryTestGeocodingDir>
+    <TestResourcesGeocodingDir>$(MSBuildThisFileDirectory)..\..\resources/test/geocoding</TestResourcesGeocodingDir>
+    <MetadataBuilderProject>$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj</MetadataBuilderProject>
+    <MetadataBuilderDll>$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\bin\$(Configuration)\net9.0\PhoneNumbers.MetadataBuilder.dll</MetadataBuilderDll>
   </PropertyGroup>
 
-  <Target Name="BuildTestGeocodingBins"
-          BeforeTargets="AssignTargetPaths"
-          Inputs="$(TestResourcesGeocodingDir)en/1.txt"
-          Outputs="$(BinaryTestGeocodingDir)en.1">
+  <!--
+    See the matching note in PhoneNumbers.csproj: <MSBuild> task instead of `dotnet run` so
+    concurrent solution-level builds of PhoneNumbers + PhoneNumbers.Test don't race on
+    MetadataBuilder's own obj\.
+  -->
+  <Target Name="BuildMetadataBuilderForTest">
+    <MSBuild Projects="$(MetadataBuilderProject)"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=net9.0"
+             BuildInParallel="false" />
+  </Target>
+
+  <!--
+    Same generate-once / embed-per-TFM split as PhoneNumbers.csproj: outer cross-targeting build
+    runs the Exec, inner per-TFM builds skip via Inputs/Outputs gating, then EmbedTestGeocoding
+    adds the resulting items each TFM. Avoids the parallel-write race when three concurrent
+    inner builds try to populate the same obj/test-geocoding directory.
+  -->
+  <Target Name="GenerateTestGeocodingBins"
+          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
+          DependsOnTargets="BuildMetadataBuilderForTest"
+          Inputs="$(TestResourcesGeocodingDir)/en/1.txt"
+          Outputs="$(BinaryTestGeocodingDir)/en.1">
     <MakeDir Directories="$(BinaryTestGeocodingDir)" />
-    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- geocoding &quot;$(TestResourcesGeocodingDir)&quot; &quot;$(BinaryTestGeocodingDir)&quot;"
-          ConsoleToMSBuild="true" />
+    <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; geocoding &quot;$(TestResourcesGeocodingDir)&quot; &quot;$(BinaryTestGeocodingDir)&quot;" />
+  </Target>
+
+  <Target Name="EmbedTestGeocoding"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="GenerateTestGeocodingBins">
+    <!-- See PhoneNumbers.csproj: glob into a private item first, then Include="@(...)" with
+         qualified metadata to avoid a cross-product batching surprise. -->
     <ItemGroup>
-      <_GeneratedTestGeocodingBin Include="$(BinaryTestGeocodingDir)*" />
-      <EmbeddedResource Include="@(_GeneratedTestGeocodingBin)"
-                        LogicalName="PhoneNumbers.Test.geocoding.%(Filename)%(Extension)" />
+      <_TestGeocodingFile Include="$(BinaryTestGeocodingDir)/*" />
+    </ItemGroup>
+    <ItemGroup>
+      <EmbeddedResource Include="@(_TestGeocodingFile)"
+                        LogicalName="PhoneNumbers.Test.geocoding.%(_TestGeocodingFile.Filename)%(_TestGeocodingFile.Extension)" />
     </ItemGroup>
   </Target>
 

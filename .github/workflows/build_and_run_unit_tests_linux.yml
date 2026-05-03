@@ -15,10 +15,8 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.x
-      - name: Add zip files required for running tests
-        run: |
-          (cd resources/geocoding; zip -r ../../resources/geocoding.zip *)
-          (cd resources/test/geocoding; zip -r ../../../resources/test/testgeocoding.zip *)
+      # Geocoding/timezones are now packed into binary files at build time by
+      # PhoneNumbers.MetadataBuilder, so the legacy zip-creation step is gone.
       - name: Restore dependencies
         run: dotnet restore
         working-directory: ./csharp

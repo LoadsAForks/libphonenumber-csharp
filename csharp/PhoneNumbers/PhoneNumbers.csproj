@@ -57,72 +57,118 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <!-- Bin output is platform/TFM-agnostic; share across all TFMs to avoid redundant builds. -->
-    <BinaryMetadataDir>$(BaseIntermediateOutputPath)metadata\</BinaryMetadataDir>
-    <BinaryGeocodingDir>$(BaseIntermediateOutputPath)geocoding\</BinaryGeocodingDir>
-    <BinaryTimezonesDir>$(BaseIntermediateOutputPath)timezones\</BinaryTimezonesDir>
+    <!--
+      Bin output is platform/TFM-agnostic; share across all TFMs (BaseIntermediateOutputPath
+      = obj\, not obj\<TFM>\). Paths intentionally do NOT end with a separator — Windows
+      shell-quoting collapses `\"` (a backslash immediately before a closing double-quote) into
+      an embedded literal `"`, which corrupts the path inside the Exec command. Trailing `/` is
+      added explicitly only on the embedding glob.
+    -->
+    <BinaryMetadataDir>$(BaseIntermediateOutputPath)metadata</BinaryMetadataDir>
+    <BinaryGeocodingDir>$(BaseIntermediateOutputPath)geocoding</BinaryGeocodingDir>
+    <BinaryTimezonesDir>$(BaseIntermediateOutputPath)timezones</BinaryTimezonesDir>
     <ResourcesDir>$(MSBuildThisFileDirectory)..\..\resources/</ResourcesDir>
+    <MetadataBuilderProject>$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj</MetadataBuilderProject>
+    <MetadataBuilderDll>$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\bin\$(Configuration)\net9.0\PhoneNumbers.MetadataBuilder.dll</MetadataBuilderDll>
   </PropertyGroup>
 
-  <Target Name="BuildBinaryMetadata"
-          BeforeTargets="AssignTargetPaths"
-          Inputs="$(ResourcesDir)PhoneNumberMetadata.xml;$(ResourcesDir)ShortNumberMetadata.xml;$(ResourcesDir)PhoneNumberAlternateFormats.xml"
-          Outputs="$(BinaryMetadataDir)PhoneNumberMetadata_US;$(BinaryMetadataDir)ShortNumberMetadata_US;$(BinaryMetadataDir)PhoneNumberAlternateFormats_49">
+  <!--
+    BuildMetadataBuilder runs the MetadataBuilder project's Build target via the in-process
+    <MSBuild> task. Two reasons we do NOT shell out to `dotnet run` instead:
+      1. `dotnet run` builds-then-runs in a separate process, and MSBuild cannot coordinate two
+         concurrent invocations. When `dotnet build PhoneNumbers.sln` builds PhoneNumbers and
+         PhoneNumbers.Test in parallel, both projects' outer cross-targeting builds would each
+         spawn that command targeting MetadataBuilder, racing on MetadataBuilder's own obj
+         folder (CS2012 on refint/PhoneNumbers.MetadataBuilder.dll).
+      2. The MSBuild task is serialized by MSBuild's BuildManager — a second caller hits the
+         cache and gets the existing build result instead of rebuilding from scratch.
+    The dll is then run directly via `dotnet path/to/dll`, which never touches obj.
+  -->
+  <Target Name="BuildMetadataBuilder">
     <!--
-      Inputs/Outputs gives us incremental builds: this target re-runs only when an XML file is
-      newer than the sentinel bin files. We pick three known-stable region/CC keys as the sentinel
-      since enumerating all ~540 outputs would bloat the project file and isn't necessary —
-      MetadataBuilder is all-or-nothing.
+      Explicitly pin TargetFramework=net9.0 so MSBuild does not try to inherit the parent
+      project's TargetFramework (which would be netstandard2.0/net8.0 for PhoneNumbers and
+      netframework4.8 for PhoneNumbers.Test) — MetadataBuilder only targets net9.0.
     -->
-    <MakeDir Directories="$(BinaryMetadataDir)" />
-    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- phone &quot;$(ResourcesDir)PhoneNumberMetadata.xml&quot; &quot;$(BinaryMetadataDir)&quot;"
-          ConsoleToMSBuild="true" />
-    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- short &quot;$(ResourcesDir)ShortNumberMetadata.xml&quot; &quot;$(BinaryMetadataDir)&quot;"
-          ConsoleToMSBuild="true" />
-    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- alternate &quot;$(ResourcesDir)PhoneNumberAlternateFormats.xml&quot; &quot;$(BinaryMetadataDir)&quot;"
-          ConsoleToMSBuild="true" />
-
-    <!--
-      Embed the generated bin files as manifest resources under the "metadata" namespace prefix.
-      The runtime EmbeddedResourceMetadataLoader does suffix-matching, so the LogicalName here is
-      the contract: <prefix>_<region-or-cc>.
-    -->
-    <ItemGroup>
-      <_GeneratedMetadataBin Include="$(BinaryMetadataDir)*" />
-      <EmbeddedResource Include="@(_GeneratedMetadataBin)"
-                        LogicalName="PhoneNumbers.metadata.%(Filename)%(Extension)" />
-    </ItemGroup>
+    <MSBuild Projects="$(MetadataBuilderProject)"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=net9.0"
+             BuildInParallel="false" />
   </Target>
 
-  <Target Name="BuildGeocodingBins"
-          BeforeTargets="AssignTargetPaths"
+  <!--
+    Generation runs ONCE on the outer cross-targeting build (BeforeTargets="DispatchToInnerBuilds")
+    and once on a direct single-TFM build (BeforeTargets="AssignTargetPaths"). Inputs/Outputs
+    gating means the per-TFM inner builds spawned by DispatchToInnerBuilds re-evaluate the target
+    after the outer has already produced the bins, see the outputs are newer, and skip — avoiding
+    the parallel-write race that broke CI when three concurrent dotnet-run invocations all wrote
+    to obj\geocoding\en.86 at once.
+  -->
+  <Target Name="GenerateBinaryMetadata"
+          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
+          DependsOnTargets="BuildMetadataBuilder"
+          Inputs="$(ResourcesDir)PhoneNumberMetadata.xml;$(ResourcesDir)ShortNumberMetadata.xml;$(ResourcesDir)PhoneNumberAlternateFormats.xml"
+          Outputs="$(BinaryMetadataDir)/PhoneNumberMetadata_US;$(BinaryMetadataDir)/ShortNumberMetadata_US;$(BinaryMetadataDir)/PhoneNumberAlternateFormats_49">
+    <MakeDir Directories="$(BinaryMetadataDir)" />
+    <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; phone &quot;$(ResourcesDir)PhoneNumberMetadata.xml&quot; &quot;$(BinaryMetadataDir)&quot;" />
+    <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; short &quot;$(ResourcesDir)ShortNumberMetadata.xml&quot; &quot;$(BinaryMetadataDir)&quot;" />
+    <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; alternate &quot;$(ResourcesDir)PhoneNumberAlternateFormats.xml&quot; &quot;$(BinaryMetadataDir)&quot;" />
+  </Target>
+
+  <Target Name="GenerateGeocodingBins"
+          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
+          DependsOnTargets="BuildMetadataBuilder"
           Inputs="$(ResourcesDir)geocoding/en/1.txt"
-          Outputs="$(BinaryGeocodingDir)en.1">
+          Outputs="$(BinaryGeocodingDir)/en.1">
     <!--
       Geocoding text files in resources/geocoding/<lang>/<countryCode>.txt are converted to
-      per-(lang, countryCode) binary files in $(BinaryGeocodingDir). The Inputs/Outputs sentinel
-      tracks just the most-likely-to-change file (English NANPA) — the tool always processes the
-      whole tree, so a fine-grained dependency list buys us nothing.
+      per-(lang, countryCode) binary files in $(BinaryGeocodingDir). Sentinel output tracks the
+      English NANPA file — MetadataBuilder is all-or-nothing so finer-grained dependency tracking
+      doesn't buy us anything.
     -->
     <MakeDir Directories="$(BinaryGeocodingDir)" />
-    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- geocoding &quot;$(ResourcesDir)geocoding/&quot; &quot;$(BinaryGeocodingDir)&quot;"
-          ConsoleToMSBuild="true" />
-    <ItemGroup>
-      <_GeneratedGeocodingBin Include="$(BinaryGeocodingDir)*" />
-      <EmbeddedResource Include="@(_GeneratedGeocodingBin)"
-                        LogicalName="PhoneNumbers.geocoding.%(Filename)%(Extension)" />
-    </ItemGroup>
+    <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; geocoding &quot;$(ResourcesDir)geocoding&quot; &quot;$(BinaryGeocodingDir)&quot;" />
   </Target>
 
-  <Target Name="BuildTimezoneBin"
-          BeforeTargets="AssignTargetPaths"
+  <Target Name="GenerateTimezoneBin"
+          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
+          DependsOnTargets="BuildMetadataBuilder"
           Inputs="$(ResourcesDir)timezones/map_data.txt"
-          Outputs="$(BinaryTimezonesDir)map_data.bin">
+          Outputs="$(BinaryTimezonesDir)/map_data.bin">
     <MakeDir Directories="$(BinaryTimezonesDir)" />
-    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\PhoneNumbers.MetadataBuilder\PhoneNumbers.MetadataBuilder.csproj&quot; --configuration $(Configuration) -- timezones &quot;$(ResourcesDir)timezones/map_data.txt&quot; &quot;$(BinaryTimezonesDir)map_data.bin&quot;"
-          ConsoleToMSBuild="true" />
+    <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; timezones &quot;$(ResourcesDir)timezones/map_data.txt&quot; &quot;$(BinaryTimezonesDir)/map_data.bin&quot;" />
+  </Target>
+
+  <!--
+    Embedding runs on every inner per-TFM build (AssignTargetPaths only — there's no resource
+    embedding on the cross-targeting outer). Items are added inside a Target rather than at
+    top-level because top-level wildcard globs are evaluated at MSBuild parse time, before the
+    Generate* targets have a chance to write the files. The Generate targets are listed as
+    DependsOn so MSBuild guarantees the bins exist (or were already up-to-date) by the time the
+    glob fires.
+  -->
+  <Target Name="EmbedBinaryMetadata"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="GenerateBinaryMetadata;GenerateGeocodingBins;GenerateTimezoneBin">
+    <!--
+      Two-step add to avoid an MSBuild item-batching surprise:
+      a single `<EmbeddedResource Include="path/*" LogicalName="...%(Filename)..." />` inside a
+      Target's ItemGroup makes MSBuild batch the metadata expansion across every existing
+      EmbeddedResource item as well as the new ones from the glob, which produces a cross-product
+      (n_metadata × n_geocoding bogus items, each with the LogicalName of an unrelated item).
+      Globbing into a private item first, then `Include="@(_X)"` with metadata, evaluates
+      %(Filename) per-item against the named collection only — no batch against EmbeddedResource.
+    -->
     <ItemGroup>
-      <EmbeddedResource Include="$(BinaryTimezonesDir)map_data.bin"
+      <_BinMetadataFile Include="$(BinaryMetadataDir)/*" />
+      <_BinGeocodingFile Include="$(BinaryGeocodingDir)/*" />
+    </ItemGroup>
+    <ItemGroup>
+      <EmbeddedResource Include="@(_BinMetadataFile)"
+                        LogicalName="PhoneNumbers.metadata.%(_BinMetadataFile.Filename)%(_BinMetadataFile.Extension)" />
+      <EmbeddedResource Include="@(_BinGeocodingFile)"
+                        LogicalName="PhoneNumbers.geocoding.%(_BinGeocodingFile.Filename)%(_BinGeocodingFile.Extension)" />
+      <EmbeddedResource Include="$(BinaryTimezonesDir)/map_data.bin"
                         LogicalName="PhoneNumbers.timezones.map_data.bin" />
     </ItemGroup>
   </Target>
@@ -139,4 +185,11 @@
     <PackageReference Include="System.IO.Compression" Version="4.3.0" />
   </ItemGroup>
 
+
+<Target Name="DiagGlob" BeforeTargets="CoreCompile">
+    <Message Text="DIAG: TFM=$(TargetFramework) Total ER items: @(EmbeddedResource->Count())" Importance="High" />
+    <Message Text="DIAG: ER %(EmbeddedResource.LogicalName) :: %(EmbeddedResource.Identity)"
+             Importance="High"
+             Condition="$([System.String]::Copy('%(EmbeddedResource.LogicalName)').StartsWith('PhoneNumbers.geocoding.PhoneNumber'))" />
+  </Target>
 </Project>
