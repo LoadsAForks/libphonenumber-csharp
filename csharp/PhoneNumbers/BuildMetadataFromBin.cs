@@ -123,8 +123,7 @@ namespace PhoneNumbers
             if ((flags & DescFlags.ShortCode) != 0) WriteDesc(writer, m.ShortCode);
             if ((flags & DescFlags.StandardRate) != 0) WriteDesc(writer, m.StandardRate);
             if ((flags & DescFlags.CarrierSpecific) != 0) WriteDesc(writer, m.CarrierSpecific);
-            if (
-                (flags & DescFlags.SmsServices) != 0) WriteDesc(writer, m.SmsServices);
+            if ((flags & DescFlags.SmsServices) != 0) WriteDesc(writer, m.SmsServices);
             if ((flags & DescFlags.NoInternationalDialling) != 0) WriteDesc(writer, m.NoInternationalDialling);
 
             writer.Write(m.Id ?? "");

@@ -103,7 +103,7 @@ namespace PhoneNumbers
             var prefix = asm.GetName().Name + "." + timezoneDataDirectory;
             var names = allNames.Where(n => n.StartsWith(prefix, StringComparison.Ordinal)).ToList();
             var mapFile = names.FirstOrDefault(s => s.EndsWith(TZMAP_BIN_FILENAME, StringComparison.Ordinal))
-                ?? throw new InvalidOperationException(
+                ?? throw new MissingMetadataException(
                     $"Timezone data resource '{prefix}{TZMAP_BIN_FILENAME}' not found on assembly '{asm.GetName().Name}'.");
             using var fp = asm.GetManifestResourceStream(mapFile);
             var prefixMap = BuildPrefixMapFromBin.ReadTimezoneMap(fp);

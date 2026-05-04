@@ -20,6 +20,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      Single ProjectReference to PhoneNumbers (which itself references MetadataBuilder). Don't
+      add a direct ProjectReference to MetadataBuilder here: at sln level it would cause MSBuild
+      to spawn two parallel builds of MetadataBuilder (one per parent), racing on apphost
+      generation under obj/Debug/net9.0/. The transitive dep through PhoneNumbers gives us the
+      ordering we need without the parallelism.
+    -->
     <ProjectReference Include="..\PhoneNumbers\PhoneNumbers.csproj" />
   </ItemGroup>
 
@@ -66,12 +73,16 @@
     concurrent solution-level builds of PhoneNumbers + PhoneNumbers.Test don't race on
     MetadataBuilder's own obj\.
   -->
-  <Target Name="BuildMetadataBuilderForTest">
-    <MSBuild Projects="$(MetadataBuilderProject)"
-             Targets="Build"
-             Properties="Configuration=$(Configuration);TargetFramework=net9.0"
-             BuildInParallel="false" />
-  </Target>
+  <!-- MetadataBuilder is built transitively via PhoneNumbers' ProjectReference. -->
+
+
+  <!--
+    Top-level ItemGroup so the wildcard is resolved at MSBuild parse time — see matching note in
+    PhoneNumbers.csproj for why we don't collect this inside the target body.
+  -->
+  <ItemGroup>
+    <_TestGeocodingTextFile Include="$(TestResourcesGeocodingDir)/**/*.txt" />
+  </ItemGroup>
 
   <!--
     Same generate-once / embed-per-TFM split as PhoneNumbers.csproj: outer cross-targeting build
@@ -80,9 +91,8 @@
     inner builds try to populate the same obj/test-geocoding directory.
   -->
   <Target Name="GenerateTestGeocodingBins"
-          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
-          DependsOnTargets="BuildMetadataBuilderForTest"
-          Inputs="$(TestResourcesGeocodingDir)/en/1.txt"
+          BeforeTargets="AssignTargetPaths"
+          Inputs="@(_TestGeocodingTextFile)"
           Outputs="$(BinaryTestGeocodingDir)/en.1">
     <MakeDir Directories="$(BinaryTestGeocodingDir)" />
     <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; geocoding &quot;$(TestResourcesGeocodingDir)&quot; &quot;$(BinaryTestGeocodingDir)&quot;" />

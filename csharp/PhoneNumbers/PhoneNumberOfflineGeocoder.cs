@@ -174,9 +174,12 @@ namespace PhoneNumbers
 
         private AreaCodeMap LoadAreaCodeMapFromFile(string fileName)
         {
+            // We only get here after MappingFileProvider has confirmed (lang, countryCode) is
+            // available, so a missing manifest resource is a packaging bug, not a user error —
+            // hence MissingMetadataException rather than a vanilla I/O exception.
             var resName = phonePrefixDataDirectory + fileName;
             using var fp = assembly.GetManifestResourceStream(resName)
-                ?? throw new InvalidOperationException(
+                ?? throw new MissingMetadataException(
                     $"Geocoding resource '{resName}' not found on assembly '{assembly.GetName().Name}'.");
 
             var sortedMap = BuildPrefixMapFromBin.ReadAreaCodeMap(fp);

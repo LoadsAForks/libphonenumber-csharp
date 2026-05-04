@@ -12,7 +12,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 
 namespace PhoneNumbers.MetadataBuilder;
 
@@ -36,7 +38,22 @@ internal static class Program
     {
         try
         {
-            return Run(args);
+            // Serialize concurrent invocations across MSBuild parents (PhoneNumbers and
+            // PhoneNumbers.Test both call us during a parallel `dotnet build` of the sln). Without
+            // this, two processes can race writing the same file under obj/geocoding/ — the
+            // failure mode that broke CI in the previous attempt at this PR. Mutex name keys off
+            // the output dir so different output trees don't cross-block, but a single writer
+            // owns each tree at a time.
+            var mutexName = ComputeMutexName(args);
+            using var mutex = new Mutex(initiallyOwned: false, name: mutexName);
+            // Mutex.WaitOne returns true once acquired; abandoned mutex (prior process crashed
+            // mid-write) throws AbandonedMutexException — we catch and proceed since on retry the
+            // new process will overwrite the partial files cleanly.
+            try { mutex.WaitOne(); }
+            catch (AbandonedMutexException) { /* prior writer crashed; safe to proceed. */ }
+
+            try { return Run(args); }
+            finally { mutex.ReleaseMutex(); }
         }
         catch (Exception ex)
         {
@@ -44,6 +61,22 @@ internal static class Program
             Console.Error.WriteLine(ex);
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Builds a stable, OS-friendly mutex name from the output path so concurrent invocations
+    /// targeting the SAME output dir contend, but invocations targeting different dirs (e.g.
+    /// PhoneNumbers/obj/geocoding vs PhoneNumbers.Test/obj/test-geocoding) run in parallel.
+    /// Hashed to dodge the named-mutex character restrictions (no path separators on Windows;
+    /// 250-char limit on macOS/Linux IIRC).
+    /// </summary>
+    private static string ComputeMutexName(string[] args)
+    {
+        // args[2] is the output dir/file for every supported subcommand.
+        var key = args.Length >= 3 ? Path.GetFullPath(args[2]) : "global";
+        using var sha = SHA1.Create();
+        var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(key));
+        return "Global\\PhoneNumbers.MetadataBuilder." + Convert.ToHexString(hash);
     }
 
     private static int Run(string[] args)
@@ -90,6 +123,8 @@ internal static class Program
     {
         if (!Directory.Exists(inputDir))
             throw new DirectoryNotFoundException($"Input directory not found: {inputDir}");
+        if (IsGeocodingOutputUpToDate(inputDir, outputDir))
+            return 0;
         Directory.CreateDirectory(outputDir);
 
         var written = 0;
@@ -120,6 +155,9 @@ internal static class Program
     {
         if (!File.Exists(inputFile))
             throw new FileNotFoundException($"Input file not found: {inputFile}", inputFile);
+        if (File.Exists(outputFile)
+            && File.GetLastWriteTimeUtc(outputFile) >= File.GetLastWriteTimeUtc(inputFile))
+            return 0;
         Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
 
         var map = ParseTimezoneText(inputFile, splitter: '&');
@@ -127,6 +165,47 @@ internal static class Program
         BuildPrefixMapFromBin.WriteTimezoneMap(fs, map);
         Console.Out.WriteLine($"PhoneNumbers.MetadataBuilder: wrote {map.Count} timezone entries to {outputFile}");
         return 0;
+    }
+
+    /// <summary>
+    /// Returns true when every per-region bin under <paramref name="outputDir"/> matching the
+    /// supplied prefix is at least as new as <paramref name="inputXml"/>. Used inside the mutex
+    /// to short-circuit redundant work when a sibling MSBuild inner build already generated the
+    /// bins.
+    /// </summary>
+    private static bool IsOutputUpToDate(string inputXml, string outputDir, string filePrefix)
+    {
+        if (!Directory.Exists(outputDir)) return false;
+        var existing = Directory.GetFiles(outputDir, filePrefix + "_*");
+        if (existing.Length == 0) return false;
+        var inputMTime = File.GetLastWriteTimeUtc(inputXml);
+        foreach (var file in existing)
+        {
+            if (File.GetLastWriteTimeUtc(file) < inputMTime) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Geocoding analog: every existing bin under <paramref name="outputDir"/> must be at least
+    /// as new as the newest .txt under <paramref name="inputDir"/>'s tree.
+    /// </summary>
+    private static bool IsGeocodingOutputUpToDate(string inputDir, string outputDir)
+    {
+        if (!Directory.Exists(outputDir)) return false;
+        var existing = Directory.GetFiles(outputDir);
+        if (existing.Length == 0) return false;
+        var newestInput = DateTime.MinValue;
+        foreach (var f in Directory.EnumerateFiles(inputDir, "*.txt", SearchOption.AllDirectories))
+        {
+            var t = File.GetLastWriteTimeUtc(f);
+            if (t > newestInput) newestInput = t;
+        }
+        foreach (var file in existing)
+        {
+            if (File.GetLastWriteTimeUtc(file) < newestInput) return false;
+        }
+        return true;
     }
 
     private static SortedDictionary<int, string> ParseAreaCodeText(string path)
@@ -176,6 +255,15 @@ internal static class Program
         bool isShortNumberMetadata,
         bool isAlternateFormatsMetadata)
     {
+        // Double-checked skip: even though MSBuild's Inputs/Outputs gating skips this target
+        // when outputs are up-to-date, three concurrent inner per-TFM builds can all pass that
+        // gate on a fresh build (no outputs yet, all see "rebuild needed") and queue behind the
+        // Mutex acquired in Main(). The first invocation does the work; subsequent ones must
+        // re-check here and skip, otherwise their concurrent re-writes race with the C#
+        // compiler reading already-embedded resources from a sibling inner build.
+        if (IsOutputUpToDate(inputXml, outputDir, filePrefix))
+            return 0;
+
         using var input = File.OpenRead(inputXml);
         var metadataList = BuildMetadataFromXml.BuildPhoneMetadataFromStream(
             input,

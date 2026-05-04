@@ -84,17 +84,13 @@
          cache and gets the existing build result instead of rebuilding from scratch.
     The dll is then run directly via `dotnet path/to/dll`, which never touches obj.
   -->
-  <Target Name="BuildMetadataBuilder">
-    <!--
-      Explicitly pin TargetFramework=net9.0 so MSBuild does not try to inherit the parent
-      project's TargetFramework (which would be netstandard2.0/net8.0 for PhoneNumbers and
-      netframework4.8 for PhoneNumbers.Test) — MetadataBuilder only targets net9.0.
-    -->
-    <MSBuild Projects="$(MetadataBuilderProject)"
-             Targets="Build"
-             Properties="Configuration=$(Configuration);TargetFramework=net9.0"
-             BuildInParallel="false" />
-  </Target>
+  <!--
+    MetadataBuilder is built via the ProjectReference above. We deliberately do NOT also call
+    `<MSBuild>` on it here: doing both creates two parallel build invocations of the same project
+    in the cross-targeting outer flow, which races on apphost generation. The ProjectReference
+    schedules MetadataBuilder before the inner per-TFM builds resolve their refs, which is when
+    our Generate* targets fire (BeforeTargets="AssignTargetPaths").
+  -->
 
   <!--
     Generation runs ONCE on the outer cross-targeting build (BeforeTargets="DispatchToInnerBuilds")
@@ -105,8 +101,7 @@
     to obj\geocoding\en.86 at once.
   -->
   <Target Name="GenerateBinaryMetadata"
-          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
-          DependsOnTargets="BuildMetadataBuilder"
+          BeforeTargets="AssignTargetPaths"
           Inputs="$(ResourcesDir)PhoneNumberMetadata.xml;$(ResourcesDir)ShortNumberMetadata.xml;$(ResourcesDir)PhoneNumberAlternateFormats.xml"
           Outputs="$(BinaryMetadataDir)/PhoneNumberMetadata_US;$(BinaryMetadataDir)/ShortNumberMetadata_US;$(BinaryMetadataDir)/PhoneNumberAlternateFormats_49">
     <MakeDir Directories="$(BinaryMetadataDir)" />
@@ -115,24 +110,32 @@
     <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; alternate &quot;$(ResourcesDir)PhoneNumberAlternateFormats.xml&quot; &quot;$(BinaryMetadataDir)&quot;" />
   </Target>
 
+  <!--
+    Top-level ItemGroup so the wildcard is resolved at MSBuild parse time and the Inputs
+    attribute on the target below sees the full file list. (If we collected the items inside the
+    target body, the gate-check happens before the body runs, sees an empty list, and the target
+    always reports up-to-date.)
+  -->
+  <ItemGroup>
+    <_GeocodingTextFile Include="$(ResourcesDir)geocoding/**/*.txt" />
+  </ItemGroup>
+
   <Target Name="GenerateGeocodingBins"
-          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
-          DependsOnTargets="BuildMetadataBuilder"
-          Inputs="$(ResourcesDir)geocoding/en/1.txt"
+          BeforeTargets="AssignTargetPaths"
+          Inputs="@(_GeocodingTextFile)"
           Outputs="$(BinaryGeocodingDir)/en.1">
     <!--
-      Geocoding text files in resources/geocoding/<lang>/<countryCode>.txt are converted to
-      per-(lang, countryCode) binary files in $(BinaryGeocodingDir). Sentinel output tracks the
-      English NANPA file — MetadataBuilder is all-or-nothing so finer-grained dependency tracking
-      doesn't buy us anything.
+      A change to ANY .txt under resources/geocoding/ should retrigger generation; the previous
+      single-file sentinel only watched en/1.txt, so editing e.g. de/49.txt during incremental
+      local builds wouldn't re-run the tool. Output sentinel is still a single file —
+      MetadataBuilder is all-or-nothing, so once en.1 is up-to-date all bins are.
     -->
     <MakeDir Directories="$(BinaryGeocodingDir)" />
     <Exec Command="dotnet &quot;$(MetadataBuilderDll)&quot; geocoding &quot;$(ResourcesDir)geocoding&quot; &quot;$(BinaryGeocodingDir)&quot;" />
   </Target>
 
   <Target Name="GenerateTimezoneBin"
-          BeforeTargets="DispatchToInnerBuilds;AssignTargetPaths"
-          DependsOnTargets="BuildMetadataBuilder"
+          BeforeTargets="AssignTargetPaths"
           Inputs="$(ResourcesDir)timezones/map_data.txt"
           Outputs="$(BinaryTimezonesDir)/map_data.bin">
     <MakeDir Directories="$(BinaryTimezonesDir)" />
@@ -185,11 +188,4 @@
     <PackageReference Include="System.IO.Compression" Version="4.3.0" />
   </ItemGroup>
 
-
-<Target Name="DiagGlob" BeforeTargets="CoreCompile">
-    <Message Text="DIAG: TFM=$(TargetFramework) Total ER items: @(EmbeddedResource->Count())" Importance="High" />
-    <Message Text="DIAG: ER %(EmbeddedResource.LogicalName) :: %(EmbeddedResource.Identity)"
-             Importance="High"
-             Condition="$([System.String]::Copy('%(EmbeddedResource.LogicalName)').StartsWith('PhoneNumbers.geocoding.PhoneNumber'))" />
-  </Target>
 </Project>

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+using System;
+
 namespace PhoneNumbers
 {
     /// <summary>
@@ -30,18 +32,41 @@ namespace PhoneNumbers
     /// </remarks>
     public static class MetadataManager
     {
-        private static readonly MetadataSource AlternateFormatsSource =
-            new(new EmbeddedResourceMetadataLoader(), "PhoneNumberAlternateFormats");
+        private const string AlternateFormatsPrefix = "PhoneNumberAlternateFormats";
+        private const string ShortNumberMetadataPrefix = "ShortNumberMetadata";
 
-        private static readonly MetadataSource ShortNumberSource =
-            new(new EmbeddedResourceMetadataLoader(), "ShortNumberMetadata");
+        private static MetadataSource alternateFormatsSource = CreateDefault(AlternateFormatsPrefix);
+        private static MetadataSource shortNumberSource = CreateDefault(ShortNumberMetadataPrefix);
+
+        private static MetadataSource CreateDefault(string filePrefix)
+            => new MetadataSource(new EmbeddedResourceMetadataLoader(), filePrefix);
+
+        /// <summary>
+        /// Replaces the <see cref="IMetadataLoader"/> used to fetch the supplementary metadata
+        /// files (<c>PhoneNumberAlternateFormats</c> and <c>ShortNumberMetadata</c>). Mirrors the
+        /// equivalent injection point in Java's <c>DefaultMetadataDependenciesProvider</c> and
+        /// pairs with the loader argument accepted by the internal <see cref="PhoneNumberUtil"/>
+        /// constructor.
+        /// </summary>
+        /// <remarks>
+        /// Intended for callers shipping trimmed or remote metadata. Should be called once at
+        /// application startup, before any metadata is requested — already-cached metadata is not
+        /// invalidated when the loader is replaced.
+        /// </remarks>
+        /// <param name="loader">Loader to use for both supplementary metadata file types.</param>
+        public static void SetMetadataLoader(IMetadataLoader loader)
+        {
+            if (loader == null) throw new ArgumentNullException(nameof(loader));
+            alternateFormatsSource = new MetadataSource(loader, AlternateFormatsPrefix);
+            shortNumberSource = new MetadataSource(loader, ShortNumberMetadataPrefix);
+        }
 
 #if NET6_0_OR_GREATER
         public static PhoneMetadata? GetAlternateFormatsForCountry(int countryCallingCode)
 #else
         public static PhoneMetadata GetAlternateFormatsForCountry(int countryCallingCode)
 #endif
-            => AlternateFormatsSource.GetMetadataForNonGeographicalRegion(countryCallingCode);
+            => alternateFormatsSource.GetMetadataForNonGeographicalRegion(countryCallingCode);
 
 #if NET6_0_OR_GREATER
         internal static PhoneMetadata? GetShortNumberMetadataForRegion(string regionCode)
@@ -51,7 +76,7 @@ namespace PhoneNumbers
         {
             if (!ShortNumbersRegionCodeSet.RegionCodeSet.Contains(regionCode))
                 return null;
-            return ShortNumberSource.GetMetadataForRegion(regionCode);
+            return shortNumberSource.GetMetadataForRegion(regionCode);
         }
     }
 }
