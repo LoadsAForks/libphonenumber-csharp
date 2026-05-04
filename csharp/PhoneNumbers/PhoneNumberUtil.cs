@@ -355,19 +355,23 @@ namespace PhoneNumbers
 
         private static PhoneNumberUtil instance;
 
-        // Lazy, cached resolver for region metadata + non-geographical-entity metadata. Replaces
-        // the eager dictionaries that used to be populated at construction by parsing the entire
-        // XML file: now we resolve a region's metadata only when first asked for it. Both the
-        // production path (binary-encoded embedded resources) and the legacy XML-stream path go
-        // through the same MetadataSource — see the constructors below.
+        // Lazy, cached resolver for region metadata. Replaces the eager Dictionary that used to
+        // be populated at construction by parsing the entire XML file: now we resolve a region's
+        // metadata only when first asked for it. Both the production path (binary-encoded
+        // embedded resources) and the legacy XML-stream path go through the same MetadataSource —
+        // see the constructors below.
         private readonly MetadataSource phoneMetadataSource;
 
-        // Set of country calling codes that map exclusively to non-geographical entities (e.g. 800
-        // for International Toll Free Service, 808 for Shared Cost). Computed once from the
-        // country-code-to-region-code map at construction. Replaces the prior
-        // countryCodeToNonGeographicalMetadataMap.Keys, which incorrectly included every country
-        // calling code seen during eager metadata loading rather than just non-geo entries.
-        private readonly HashSet<int> nonGeoCallingCodes;
+        // Non-geographical-entity metadata is eager-loaded at construction (there are only ~9
+        // such codes: 800, 808, 870, 878, 881, 882, 883, 888, 979). Eager loading keeps the
+        // GetSupportedGlobalNetworkCallingCodes() public API exactly as it was — returning the
+        // dictionary's KeyCollection — without paying for it elsewhere. Lazy loading would have
+        // forced a return-type change, which would be a binary-breaking API change.
+        // Note that this map ONLY contains non-geographical entries, matching the docstring and
+        // Java's getSupportedGlobalNetworkCallingCodes() semantics; the prior eager-XML
+        // implementation incidentally stuffed every loaded country code in here, which made the
+        // .Keys collection contradict the documented "non-geographical only" contract.
+        private readonly Dictionary<int, PhoneMetadata> countryCodeToNonGeographicalMetadataMap;
 
         public const string REGION_CODE_FOR_NON_GEO_ENTITY = "001";
 
@@ -529,7 +533,7 @@ namespace PhoneNumbers
             }
             Initialize(new InMemoryMetadataLoader(inMemory), countryCallingCodeToRegionCodeMap,
                 out this.countryCallingCodeToRegionCodeMap, out supportedRegions, out nanpaRegions,
-                out nonGeoCallingCodes, out phoneMetadataSource);
+                out countryCodeToNonGeographicalMetadataMap, out phoneMetadataSource);
         }
 
         // Production constructor: lazy per-region loading via the supplied IMetadataLoader. The
@@ -543,7 +547,7 @@ namespace PhoneNumbers
                 throw new ArgumentNullException(nameof(countryCallingCodeToRegionCodeMap));
             Initialize(metadataLoader, countryCallingCodeToRegionCodeMap,
                 out this.countryCallingCodeToRegionCodeMap, out supportedRegions, out nanpaRegions,
-                out nonGeoCallingCodes, out phoneMetadataSource);
+                out countryCodeToNonGeographicalMetadataMap, out phoneMetadataSource);
         }
 
         private static void Initialize(
@@ -552,30 +556,37 @@ namespace PhoneNumbers
             out Dictionary<int, List<string>> outMap,
             out HashSet<string> outSupportedRegions,
             out HashSet<string> outNanpaRegions,
-            out HashSet<int> outNonGeoCallingCodes,
+            out Dictionary<int, PhoneMetadata> outNonGeoMap,
             out MetadataSource outSource)
         {
             outMap = ccToRegions;
+            outSource = new MetadataSource(loader, "PhoneNumberMetadata");
 
 #if NET6_0_OR_GREATER
             outSupportedRegions = new HashSet<string>(280); // currently 245 items
-            outNonGeoCallingCodes = new HashSet<int>(16);
+            outNonGeoMap = new Dictionary<int, PhoneMetadata>(16);
 #else
             outSupportedRegions = new HashSet<string>();
-            outNonGeoCallingCodes = new HashSet<int>();
+            outNonGeoMap = new Dictionary<int, PhoneMetadata>();
 #endif
             foreach (var entry in ccToRegions)
             {
                 outSupportedRegions.UnionWith(entry.Value);
                 if (entry.Value.Contains(REGION_CODE_FOR_NON_GEO_ENTITY))
-                    outNonGeoCallingCodes.Add(entry.Key);
+                {
+                    // Eager-load the ~9 non-geographical-entity metadata files so the
+                    // public GetSupportedGlobalNetworkCallingCodes() API can keep returning the
+                    // dictionary's KeyCollection unchanged (matching the pre-binary-metadata
+                    // public type). The total is small enough that doing this at construction
+                    // doesn't undermine the lazy-loading benefit for region metadata.
+                    var m = outSource.GetMetadataForNonGeographicalRegion(entry.Key);
+                    if (m != null) outNonGeoMap[entry.Key] = m;
+                }
             }
             outSupportedRegions.Remove(REGION_CODE_FOR_NON_GEO_ENTITY);
 
             outNanpaRegions = ccToRegions.TryGetValue(NANPA_COUNTRY_CODE, out var regions)
                 ? new HashSet<string>(regions) : new HashSet<string>();
-
-            outSource = new MetadataSource(loader, "PhoneNumberMetadata");
         }
 
         // Mirrors the file-naming convention emitted by PhoneNumbers.MetadataBuilder: region code
@@ -922,15 +933,15 @@ namespace PhoneNumbers
         /// <returns>An unordered set of the country calling codes for every non-geographical entity the
         /// library supports (e.g. 800, 808, 870 for international toll-free / shared-cost / etc.).</returns>
         /// <remarks>
-        /// The return type changed from <c>Dictionary&lt;int, PhoneMetadata&gt;.KeyCollection</c> to
-        /// <see cref="HashSet{T}"/> when metadata loading switched to the lazy MetadataSource —
-        /// the prior collection was a leak of an internal dictionary that incidentally contained
-        /// every loaded calling code (geographical and non-geographical), not just non-geo as
-        /// documented. Source-level callers using <c>foreach</c> or LINQ are unaffected.
+        /// The semantics match Java's <c>getSupportedGlobalNetworkCallingCodes()</c>: only
+        /// calling codes that map exclusively to non-geographical entities. The pre-binary-metadata
+        /// implementation incidentally returned every loaded calling code (geographical too)
+        /// because it leaked an internal dictionary populated by the eager XML loader; that was a
+        /// bug — the docstring always promised "non-geographical entity" only.
         /// </remarks>
-        public HashSet<int> GetSupportedGlobalNetworkCallingCodes()
+        public Dictionary<int, PhoneMetadata>.KeyCollection GetSupportedGlobalNetworkCallingCodes()
         {
-            return nonGeoCallingCodes;
+            return countryCodeToNonGeographicalMetadataMap.Keys;
         }
 
         /// <summary>
@@ -1751,14 +1762,7 @@ namespace PhoneNumbers
         }
 
         public PhoneMetadata GetMetadataForNonGeographicalRegion(int countryCallingCode)
-        {
-            // Guard against geographical calling codes — Java's NonGeographicalEntityMetadataSource
-            // does the same check via supportedCallingCodes(). Without this, looking up a
-            // geographical CC (e.g. 1 for NANPA) would incorrectly attempt to load metadata using
-            // the calling-code key.
-            if (!nonGeoCallingCodes.Contains(countryCallingCode)) return null;
-            return phoneMetadataSource.GetMetadataForNonGeographicalRegion(countryCallingCode);
-        }
+            => countryCodeToNonGeographicalMetadataMap.TryGetValue(countryCallingCode, out var m) ? m : null;
 
         private bool IsNumberMatchingDesc(string nationalNumber, PhoneNumberDesc numberDesc)
         {
