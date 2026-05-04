@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 #if NET5_0_OR_GREATER || NETSTANDARD2_1_OR_GREATER
 
@@ -534,14 +535,13 @@ namespace PhoneNumbers
 
             var regionCode = GetRegionCodeForCountryCode(countryCode);
             var metadataForRegion = GetMetadataForRegionOrCallingCode(countryCode, regionCode);
-            MaybeAppendFormattedExtension(ref intermediateResult,
-                ref intermediateResultLength,
-                number,
-                metadataForRegion,
-                PhoneNumberFormat.INTERNATIONAL);
+            // Strip any extension already present in the raw input before appending the formatted one.
+            var body = new string(intermediateResult.Slice(0, intermediateResultLength));
+            var bodyBuilder = new StringBuilder(body);
+            MaybeStripExtension(bodyBuilder, body);
+            MaybeAppendFormattedExtension(number, metadataForRegion, PhoneNumberFormat.INTERNATIONAL, bodyBuilder);
 
-            return string.Concat(result1.Slice(0, result1Length),
-                intermediateResult.Slice(0, intermediateResultLength));
+            return string.Concat(result1.Slice(0, result1Length).ToString(), bodyBuilder.ToString());
         }
 
         internal static void NormalizeDigits(ref Span<char> span,
