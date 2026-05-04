@@ -16,10 +16,8 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.x
-      - name: Add zip files required for running tests
-        run: |
-          Compress-Archive -Path "resources\geocoding\*" -DestinationPath "resources\geocoding.zip"
-          Compress-Archive -Path "resources\test\geocoding\*" -DestinationPath "resources\test\testgeocoding.zip"
+      # Geocoding/timezones are now packed into binary files at build time by
+      # PhoneNumbers.MetadataBuilder, so the legacy zip-creation step is gone.
       - name: Run tests
         run: dotnet test csharp/PhoneNumbers.sln --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
       - name: Upload coverage reports to Codecov
