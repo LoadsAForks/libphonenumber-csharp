@@ -25,7 +25,15 @@ namespace PhoneNumbers.Test
     /// <summary>
     /// Some basic tests to check that the phone number metadata can be correctly loaded.
     /// </summary>
-    /// <remarks>Author: Lara Rennie</remarks>
+    /// <remarks>
+    /// Joined to the <c>TestMetadataTestCase</c> xunit collection so this class serializes with
+    /// the other tests that hit <see cref="MetadataManager"/> indirectly (via
+    /// <see cref="PhoneNumberMatcher"/> et al). <see cref="SetMetadataLoader_RoutesLookupsThroughCustomLoader"/>
+    /// installs a fake loader as a side effect; without serialization, parallel matcher tests
+    /// can briefly see the fake and fail to look up alternate formats.
+    /// <para/>Author: Lara Rennie
+    /// </remarks>
+    [Collection("TestMetadataTestCase")]
     public class TestMedataManager
     {
         [Fact]
