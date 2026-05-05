@@ -1779,8 +1779,25 @@ namespace PhoneNumbers
         /// <returns>A bool that indicates whether the number is of a valid pattern.</returns>
         public bool IsValidNumber(PhoneNumber number)
         {
-            var regionCode = GetRegionCodeForNumber(number);
-            return IsValidNumberForRegion(number, regionCode);
+            // Inlined to share the national significant number string between region lookup and
+            // validation in the case where the country calling code maps to multiple regions
+            // (e.g. NANPA). For single-region calling codes the NSN is only computed once anyway.
+            countryCallingCodeToRegionCodeMap.TryGetValue(number.CountryCode, out var regions);
+            if (regions == null)
+                return IsValidNumberForRegion(number, null, null);
+
+            string regionCode;
+            string nationalSignificantNumber = null;
+            if (regions.Count == 1)
+            {
+                regionCode = regions[0];
+            }
+            else
+            {
+                nationalSignificantNumber = GetNationalSignificantNumber(number);
+                regionCode = GetRegionCodeForNumberFromRegionList(number, regions, nationalSignificantNumber);
+            }
+            return IsValidNumberForRegion(number, regionCode, nationalSignificantNumber);
         }
 
         /// <summary>
@@ -1795,6 +1812,11 @@ namespace PhoneNumbers
         /// <param name="regionCode">The region that we want to validate the phone number for.</param>
         /// <returns>A bool that indicates whether the number is of a valid pattern.</returns>
         public bool IsValidNumberForRegion(PhoneNumber number, string regionCode)
+            => IsValidNumberForRegion(number, regionCode, null);
+
+        // Same as the public overload, but accepts a pre-computed national significant number to avoid
+        // re-allocating it when the caller already has it in hand.
+        private bool IsValidNumberForRegion(PhoneNumber number, string regionCode, string nationalSignificantNumber)
         {
             var countryCode = number.CountryCode;
             var metadata = GetMetadataForRegionOrCallingCode(countryCode, regionCode);
@@ -1815,7 +1837,7 @@ namespace PhoneNumbers
                 var numberLength = GetNationalSignificantNumberLength(number);
                 return numberLength > MIN_LENGTH_FOR_NSN && numberLength <= MAX_LENGTH_FOR_NSN;
             }
-            return GetNumberTypeHelper(GetNationalSignificantNumber(number), metadata) != PhoneNumberType.UNKNOWN;
+            return GetNumberTypeHelper(nationalSignificantNumber ?? GetNationalSignificantNumber(number), metadata) != PhoneNumberType.UNKNOWN;
         }
 
         /// <summary>
@@ -1837,8 +1859,11 @@ namespace PhoneNumbers
 
         private string GetRegionCodeForNumberFromRegionList(PhoneNumber number,
             List<string> regionCodes)
+            => GetRegionCodeForNumberFromRegionList(number, regionCodes, GetNationalSignificantNumber(number));
+
+        private string GetRegionCodeForNumberFromRegionList(PhoneNumber number,
+            List<string> regionCodes, string nationalNumber)
         {
-            var nationalNumber = GetNationalSignificantNumber(number);
             foreach (var regionCode in regionCodes)
             {
                 // If leadingDigits is present, use this. Otherwise, do full validation.
@@ -2277,7 +2302,20 @@ namespace PhoneNumbers
         {
             if (number.Length == 0)
                 return 0;
-            var fullNumber = new StringBuilder(number);
+            return MaybeExtractCountryCode(new StringBuilder(number), defaultRegionMetadata,
+                nationalNumber, keepRawInput, phoneNumber);
+        }
+
+        // Same as the string overload above, but takes a StringBuilder workspace directly so callers
+        // that already hold a StringBuilder can avoid an extra string<->StringBuilder round-trip.
+        // The fullNumber buffer is always mutated (Normalize is unconditional, and any leading '+' or
+        // IDD prefix is stripped) — this is true even on the return-0 / no-country-code path. Callers
+        // that need the original content untouched must pass a copy.
+        private int MaybeExtractCountryCode(StringBuilder fullNumber, PhoneMetadata defaultRegionMetadata,
+            StringBuilder nationalNumber, bool keepRawInput, PhoneNumber phoneNumber)
+        {
+            if (fullNumber.Length == 0)
+                return 0;
             // Set the default prefix to be something that will never match.
             var possibleCountryIddPrefix = "NonMatch";
             if (defaultRegionMetadata != null)
@@ -2322,7 +2360,9 @@ namespace PhoneNumbers
                 if (normalizedNumber.StartsWith(defaultCountryCodeString, StringComparison.Ordinal))
                 {
                     var potentialNationalNumberString = normalizedNumber.Substring(defaultCountryCodeString.Length);
-                    var potentialNationalNumber = fullNumber.Remove(0, defaultCountryCodeString.Length);
+                    // Use a separate buffer for the strip-CC trial so callers that share fullNumber as
+                    // their workspace are not corrupted when this branch decides not to commit.
+                    var potentialNationalNumber = new StringBuilder(potentialNationalNumberString);
                     var generalDesc = defaultRegionMetadata.GeneralDesc;
                     if (MaybeStripNationalPrefixAndCarrierCode(potentialNationalNumber, potentialNationalNumberString, defaultRegionMetadata, false, out _))
                         potentialNationalNumberString = potentialNationalNumber.ToString();
@@ -2691,10 +2731,11 @@ namespace PhoneNumbers
             int countryCode;
             try
             {
-                // TODO: This method should really just take in the string buffer that has already
-                // been created, and just remove the prefix, rather than taking in a string and then
-                // outputting a string buffer.
-                countryCode = MaybeExtractCountryCode(nationalNumberString, regionMetadata,
+                // Pass the existing StringBuilder directly so MaybeExtractCountryCode can use it as its
+                // working buffer instead of allocating a fresh copy of nationalNumberString. nationalNumber
+                // is consumed/mutated by this call; the catch path below relies on nationalNumberString,
+                // not on the StringBuilder.
+                countryCode = MaybeExtractCountryCode(nationalNumber, regionMetadata,
                     normalizedNationalNumber, keepRawInput, phoneNumber);
             }
             catch (NumberParseException e) when (e.ErrorType == ErrorType.INVALID_COUNTRY_CODE)
