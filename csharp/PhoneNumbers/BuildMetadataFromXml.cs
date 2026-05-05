@@ -308,7 +308,7 @@ namespace PhoneNumbers
             var availableFormats = element.Element("availableFormats");
             var hasExplicitIntlFormatDefined = false;
 
-            if (availableFormats != null && availableFormats.HasElements)
+            if (availableFormats is { HasElements: true })
             {
                 foreach (var numberFormatElement in availableFormats.Elements())
                 {

@@ -82,7 +82,7 @@ namespace PhoneNumbers
             foreach (var entry in map)
             {
                 writer.Write(entry.Key);
-                var zones = entry.Value ?? System.Array.Empty<string>();
+                var zones = entry.Value ?? [];
                 writer.Write(zones.Length);
                 for (var i = 0; i < zones.Length; i++)
                     writer.Write(zones[i] ?? "");

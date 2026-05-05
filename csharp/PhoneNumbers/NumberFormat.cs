@@ -18,7 +18,7 @@ namespace PhoneNumbers
 
         internal NumberFormat Clone() => (NumberFormat)MemberwiseClone();
 
-        internal readonly List<string> leadingDigitsPattern_ = new List<string>();
+        internal readonly List<string> leadingDigitsPattern_ = [];
 
         public static NumberFormat DefaultInstance { get; } = new();
 

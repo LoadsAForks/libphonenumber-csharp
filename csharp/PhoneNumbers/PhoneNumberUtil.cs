@@ -1023,7 +1023,7 @@ namespace PhoneNumbers
         {
             if (!IsValidRegionCode(regionCode))
             {
-                return new HashSet<PhoneNumberType>();
+                return [];
             }
             var metadata = GetMetadataForRegion(regionCode);
             return GetSupportedTypesForMetadata(metadata);
@@ -1619,7 +1619,7 @@ namespace PhoneNumbers
                 {
                     try
                     {
-                        if (desc != null && desc.HasExampleNumber)
+                        if (desc is { HasExampleNumber: true })
                         {
                             return Parse("+" + countryCallingCode + desc.ExampleNumber, UNKNOWN_REGION);
                         }
@@ -1656,37 +1656,22 @@ namespace PhoneNumbers
             }
         }
 
-        static PhoneNumberDesc GetNumberDescByType(PhoneMetadata metadata, PhoneNumberType type)
-        {
-            switch (type)
+        static PhoneNumberDesc GetNumberDescByType(PhoneMetadata metadata, PhoneNumberType type) =>
+            type switch
             {
-                case PhoneNumberType.PREMIUM_RATE:
-                    return metadata.PremiumRate;
-                case PhoneNumberType.TOLL_FREE:
-                    return metadata.TollFree;
-                case PhoneNumberType.MOBILE:
-                    return metadata.Mobile;
-                case PhoneNumberType.FIXED_LINE:
-                case PhoneNumberType.FIXED_LINE_OR_MOBILE:
-                    return metadata.FixedLine;
-                case PhoneNumberType.SHARED_COST:
-                    return metadata.SharedCost;
-                case PhoneNumberType.VOIP:
-                    return metadata.Voip;
-                case PhoneNumberType.PERSONAL_NUMBER:
-                    return metadata.PersonalNumber;
-                case PhoneNumberType.PAGER:
-                    return metadata.Pager;
-                case PhoneNumberType.UAN:
-                    return metadata.Uan;
-                case PhoneNumberType.VOICEMAIL:
-                    return metadata.Voicemail;
-                case PhoneNumberType.UNKNOWN:
-                    return metadata.GeneralDesc;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(type), type, null);
-            }
-        }
+                PhoneNumberType.PREMIUM_RATE => metadata.PremiumRate,
+                PhoneNumberType.TOLL_FREE => metadata.TollFree,
+                PhoneNumberType.MOBILE => metadata.Mobile,
+                PhoneNumberType.FIXED_LINE or PhoneNumberType.FIXED_LINE_OR_MOBILE => metadata.FixedLine,
+                PhoneNumberType.SHARED_COST => metadata.SharedCost,
+                PhoneNumberType.VOIP => metadata.Voip,
+                PhoneNumberType.PERSONAL_NUMBER => metadata.PersonalNumber,
+                PhoneNumberType.PAGER => metadata.Pager,
+                PhoneNumberType.UAN => metadata.Uan,
+                PhoneNumberType.VOICEMAIL => metadata.Voicemail,
+                PhoneNumberType.UNKNOWN => metadata.GeneralDesc,
+                _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
+            };
 
         /// <summary>
         /// Gets the type of a phone number.

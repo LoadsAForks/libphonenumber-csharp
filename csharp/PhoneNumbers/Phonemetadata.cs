@@ -44,8 +44,8 @@ namespace PhoneNumbers
         public const int LeadingZeroPossibleFieldNumber = 26;
         public const int MobileNumberPortableRegionFieldNumber = 32;
 
-        internal readonly List<NumberFormat> intlNumberFormat_ = new List<NumberFormat>();
-        internal readonly List<NumberFormat> numberFormat_ = new List<NumberFormat>();
+        internal readonly List<NumberFormat> intlNumberFormat_ = [];
+        internal readonly List<NumberFormat> numberFormat_ = [];
 
         public static PhoneMetadata DefaultInstance { get; } = new();
 

@@ -26,12 +26,12 @@ namespace PhoneNumbers
 {
     public class Locale
     {
-        public static readonly Locale English = new Locale("en", "GB");
-        public static readonly Locale French = new Locale("fr", "FR");
-        public static readonly Locale German = new Locale("de", "DE");
-        public static readonly Locale Italian = new Locale("it", "IT");
-        public static readonly Locale Korean = new Locale("ko", "KR");
-        public static readonly Locale SimplifiedChinese = new Locale("zh", "CN");
+        public static readonly Locale English = new("en", "GB");
+        public static readonly Locale French = new("fr", "FR");
+        public static readonly Locale German = new("de", "DE");
+        public static readonly Locale Italian = new("it", "IT");
+        public static readonly Locale Korean = new("ko", "KR");
+        public static readonly Locale SimplifiedChinese = new("zh", "CN");
 
         public readonly string Language;
         public readonly string Country;

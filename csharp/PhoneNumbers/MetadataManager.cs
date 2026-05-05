@@ -57,8 +57,8 @@ namespace PhoneNumbers
         public static void SetMetadataLoader(IMetadataLoader loader)
         {
             if (loader == null) throw new ArgumentNullException(nameof(loader));
-            alternateFormatsSource = new MetadataSource(loader, AlternateFormatsPrefix);
-            shortNumberSource = new MetadataSource(loader, ShortNumberMetadataPrefix);
+            alternateFormatsSource = new(loader, AlternateFormatsPrefix);
+            shortNumberSource = new(loader, ShortNumberMetadataPrefix);
         }
 
 #if NET6_0_OR_GREATER
