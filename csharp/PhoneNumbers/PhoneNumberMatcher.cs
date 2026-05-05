@@ -256,7 +256,7 @@ namespace PhoneNumbers
         // another number, such as for: (530) 583-6985 x302/x2303 -> the second extension here makes this
         // actually two phone numbers, (530) 583-6985 x302 and (530) 583-6985 x2303. We remove the second
         // extension so that the first number is parsed correctly.
-        private static readonly char[] SecondNumberStartChars = new[] { '\\', '/' };
+        private static readonly char[] SecondNumberStartChars = ['\\', '/'];
 
         internal static string TrimAfterSecondNumberStart(string number)
         {
@@ -647,7 +647,7 @@ namespace PhoneNumbers
                 util.ChooseFormattingPatternForNumber(metadata.numberFormat_, nationalNumber);
             // To do this, we check that a national prefix formatting rule was present and that it wasn't
             // just the first-group symbol ($1) with punctuation.
-            if (formatRule != null && formatRule.NationalPrefixFormattingRule.Length > 0)
+            if (formatRule is { NationalPrefixFormattingRule.Length: > 0 })
             {
                 if (formatRule.NationalPrefixOptionalWhenFormatting)
                 {

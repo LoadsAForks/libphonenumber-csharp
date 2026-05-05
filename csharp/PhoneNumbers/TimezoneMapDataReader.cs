@@ -22,8 +22,7 @@ namespace PhoneNumbers
                 if (indexOfDelimiter == -1)
                     continue;
 
-                var lineFields = new string[] { line.Substring(0, indexOfDelimiter), line.Substring(indexOfDelimiter + 1) };
-                return new List<string>(lineFields);
+                return [line.Substring(0, indexOfDelimiter), line.Substring(indexOfDelimiter + 1)];
             }
 
             return null;

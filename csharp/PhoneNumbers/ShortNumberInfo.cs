@@ -410,21 +410,15 @@ namespace PhoneNumbers
                 return "";
             }
 
-            PhoneNumberDesc desc = null;
-            switch (cost)
+            // UNKNOWN_COST numbers are computed by the process of elimination from the other cost
+            // categories.
+            var desc = cost switch
             {
-                case ShortNumberCost.TOLL_FREE:
-                    desc = phoneMetadata.TollFree;
-                    break;
-                case ShortNumberCost.STANDARD_RATE:
-                    desc = phoneMetadata.StandardRate;
-                    break;
-                case ShortNumberCost.PREMIUM_RATE:
-                    desc = phoneMetadata.PremiumRate;
-                    break;
-                    // UNKNOWN_COST numbers are computed by the process of elimination from the other cost
-                    // categories.
-            }
+                ShortNumberCost.TOLL_FREE => phoneMetadata.TollFree,
+                ShortNumberCost.STANDARD_RATE => phoneMetadata.StandardRate,
+                ShortNumberCost.PREMIUM_RATE => phoneMetadata.PremiumRate,
+                _ => null,
+            };
             return desc?.ExampleNumber ?? string.Empty;
         }
 

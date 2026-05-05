@@ -40,7 +40,7 @@ namespace PhoneNumbers
         // Currently we support only one non-primitive type and the depth of the "family tree" is 2,
         // meaning a field may have only direct descendants, who may not have descendants of their own. If
         // this changes, the blacklist handling in this class should also change.
-        internal static readonly SortedSet<string> ExcludableParentFields = new SortedSet<string>
+        internal static readonly SortedSet<string> ExcludableParentFields = new()
         {
             "fixedLine",
             "mobile",
@@ -64,7 +64,7 @@ namespace PhoneNumbers
         // The current implementation assumes that all PhoneNumberDesc fields are present here, since it
         // "clears" a PhoneNumberDesc field by simply clearing all of the fields under it. See the comment
         // above, about all 3 sets, for more about these fields.
-        internal static readonly SortedSet<string> ExcludableChildFields = new SortedSet<string>
+        internal static readonly SortedSet<string> ExcludableChildFields = new()
         {
             "nationalNumberPattern",
             "possibleLength",
@@ -72,7 +72,7 @@ namespace PhoneNumbers
             "exampleNumber"
         };
 
-        internal static readonly SortedSet<string> ExcludableChildlessFields = new SortedSet<string>
+        internal static readonly SortedSet<string> ExcludableChildlessFields = new()
         {
             "preferredInternationalPrefix",
             "nationalPrefix",
@@ -94,12 +94,12 @@ namespace PhoneNumbers
         // Note: If changing the blacklist here or the name of the method, update documentation about
         // affected methods at the same time:
         // https://github.com/googlei18n/libphonenumber/blob/master/FAQ.md#what-is-the-metadatalitejsmetadata_lite-option
-        internal static MetadataFilter ForLiteBuild() => new MetadataFilter(ParseFieldMapFromString("exampleNumber"));
+        internal static MetadataFilter ForLiteBuild() => new(ParseFieldMapFromString("exampleNumber"));
 
-        internal static MetadataFilter ForSpecialBuild() => new MetadataFilter(ComputeComplement(ParseFieldMapFromString("mobile")));
+        internal static MetadataFilter ForSpecialBuild() => new(ComputeComplement(ParseFieldMapFromString("mobile")));
 
         // Empty blacklist, meaning we filter nothing.
-        internal static MetadataFilter EmptyFilter() => new MetadataFilter(new Dictionary<string, SortedSet<string>>());
+        internal static MetadataFilter EmptyFilter() => new(new Dictionary<string, SortedSet<string>>());
 
 #if NET6_0_OR_GREATER
         public override bool Equals(object? obj)
