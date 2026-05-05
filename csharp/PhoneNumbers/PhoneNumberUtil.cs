@@ -2277,7 +2277,18 @@ namespace PhoneNumbers
         {
             if (number.Length == 0)
                 return 0;
-            var fullNumber = new StringBuilder(number);
+            return MaybeExtractCountryCode(new StringBuilder(number), defaultRegionMetadata,
+                nationalNumber, keepRawInput, phoneNumber);
+        }
+
+        // Same as the string overload above, but takes a StringBuilder workspace directly so callers
+        // that already hold a StringBuilder can avoid an extra string<->StringBuilder round-trip.
+        // The fullNumber buffer is mutated by this method (normalized, prefix stripped).
+        private int MaybeExtractCountryCode(StringBuilder fullNumber, PhoneMetadata defaultRegionMetadata,
+            StringBuilder nationalNumber, bool keepRawInput, PhoneNumber phoneNumber)
+        {
+            if (fullNumber.Length == 0)
+                return 0;
             // Set the default prefix to be something that will never match.
             var possibleCountryIddPrefix = "NonMatch";
             if (defaultRegionMetadata != null)
@@ -2322,7 +2333,9 @@ namespace PhoneNumbers
                 if (normalizedNumber.StartsWith(defaultCountryCodeString, StringComparison.Ordinal))
                 {
                     var potentialNationalNumberString = normalizedNumber.Substring(defaultCountryCodeString.Length);
-                    var potentialNationalNumber = fullNumber.Remove(0, defaultCountryCodeString.Length);
+                    // Use a separate buffer for the strip-CC trial so callers that share fullNumber as
+                    // their workspace are not corrupted when this branch decides not to commit.
+                    var potentialNationalNumber = new StringBuilder(potentialNationalNumberString);
                     var generalDesc = defaultRegionMetadata.GeneralDesc;
                     if (MaybeStripNationalPrefixAndCarrierCode(potentialNationalNumber, potentialNationalNumberString, defaultRegionMetadata, false, out _))
                         potentialNationalNumberString = potentialNationalNumber.ToString();
@@ -2691,10 +2704,11 @@ namespace PhoneNumbers
             int countryCode;
             try
             {
-                // TODO: This method should really just take in the string buffer that has already
-                // been created, and just remove the prefix, rather than taking in a string and then
-                // outputting a string buffer.
-                countryCode = MaybeExtractCountryCode(nationalNumberString, regionMetadata,
+                // Pass the existing StringBuilder directly so MaybeExtractCountryCode can use it as its
+                // working buffer instead of allocating a fresh copy of nationalNumberString. nationalNumber
+                // is consumed/mutated by this call; the catch path below relies on nationalNumberString,
+                // not on the StringBuilder.
+                countryCode = MaybeExtractCountryCode(nationalNumber, regionMetadata,
                     normalizedNationalNumber, keepRawInput, phoneNumber);
             }
             catch (NumberParseException e) when (e.ErrorType == ErrorType.INVALID_COUNTRY_CODE)
