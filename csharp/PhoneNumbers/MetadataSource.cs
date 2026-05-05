@@ -32,10 +32,16 @@ namespace PhoneNumbers
         private readonly ConcurrentDictionary<string, PhoneMetadata?> regionCache = new();
         private readonly ConcurrentDictionary<int, PhoneMetadata?> nonGeoCache = new();
 
+        // Cached factory delegates so cache-hit lookups don't allocate a fresh closure each call.
+        private readonly System.Func<string, PhoneMetadata?> regionLoader;
+        private readonly System.Func<int, PhoneMetadata?> nonGeoLoader;
+
         public MetadataSource(IMetadataLoader loader, string filePrefix)
         {
             this.loader = loader;
             this.filePrefix = filePrefix;
+            regionLoader = Load;
+            nonGeoLoader = key => Load(key.ToString(CultureInfo.InvariantCulture));
         }
 
         /// <summary>
@@ -43,15 +49,14 @@ namespace PhoneNumbers
         /// loader has no resource for that region. The result is cached for subsequent lookups.
         /// </summary>
         public PhoneMetadata? GetMetadataForRegion(string regionCode)
-            => regionCache.GetOrAdd(regionCode, key => Load(key));
+            => regionCache.GetOrAdd(regionCode, regionLoader);
 
         /// <summary>
         /// Returns the metadata for a non-geographical entity (e.g. country calling code 800), or
         /// <c>null</c> if no metadata exists for that calling code.
         /// </summary>
         public PhoneMetadata? GetMetadataForNonGeographicalRegion(int countryCallingCode)
-            => nonGeoCache.GetOrAdd(countryCallingCode, key =>
-                Load(key.ToString(CultureInfo.InvariantCulture)));
+            => nonGeoCache.GetOrAdd(countryCallingCode, nonGeoLoader);
 
         private PhoneMetadata? Load(string key)
         {

@@ -31,7 +31,10 @@ namespace PhoneNumbers
 
         private static readonly ConcurrentDictionary<string, PhoneRegex> cache = new();
 
-        internal static PhoneRegex Get(string regex) => cache.GetOrAdd(regex, k => new PhoneRegex(k));
+        // Cached factory delegate so cache-hit lookups never allocate a fresh closure.
+        private static readonly Func<string, PhoneRegex> factory = k => new PhoneRegex(k);
+
+        internal static PhoneRegex Get(string regex) => cache.GetOrAdd(regex, factory);
 
         public PhoneRegex(string pattern)
         {
