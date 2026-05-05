@@ -1782,7 +1782,7 @@ namespace PhoneNumbers
             // Inlined to share the national significant number string between region lookup and
             // validation in the case where the country calling code maps to multiple regions
             // (e.g. NANPA). For single-region calling codes the NSN is only computed once anyway.
-            countryCallingCodeToRegionCodeMap.TryGetValue(number.CountryCode, out List<string> regions);
+            countryCallingCodeToRegionCodeMap.TryGetValue(number.CountryCode, out var regions);
             if (regions == null)
                 return IsValidNumberForRegion(number, null, null);
 
@@ -2308,7 +2308,9 @@ namespace PhoneNumbers
 
         // Same as the string overload above, but takes a StringBuilder workspace directly so callers
         // that already hold a StringBuilder can avoid an extra string<->StringBuilder round-trip.
-        // The fullNumber buffer is mutated by this method (normalized, prefix stripped).
+        // The fullNumber buffer is always mutated (Normalize is unconditional, and any leading '+' or
+        // IDD prefix is stripped) — this is true even on the return-0 / no-country-code path. Callers
+        // that need the original content untouched must pass a copy.
         private int MaybeExtractCountryCode(StringBuilder fullNumber, PhoneMetadata defaultRegionMetadata,
             StringBuilder nationalNumber, bool keepRawInput, PhoneNumber phoneNumber)
         {

@@ -9,6 +9,7 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
+using System;
 using System.Collections.Concurrent;
 using System.Globalization;
 
@@ -33,8 +34,8 @@ namespace PhoneNumbers
         private readonly ConcurrentDictionary<int, PhoneMetadata?> nonGeoCache = new();
 
         // Cached factory delegates so cache-hit lookups don't allocate a fresh closure each call.
-        private readonly System.Func<string, PhoneMetadata?> regionLoader;
-        private readonly System.Func<int, PhoneMetadata?> nonGeoLoader;
+        private readonly Func<string, PhoneMetadata?> regionLoader;
+        private readonly Func<int, PhoneMetadata?> nonGeoLoader;
 
         public MetadataSource(IMetadataLoader loader, string filePrefix)
         {
