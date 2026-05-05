@@ -1779,8 +1779,25 @@ namespace PhoneNumbers
         /// <returns>A bool that indicates whether the number is of a valid pattern.</returns>
         public bool IsValidNumber(PhoneNumber number)
         {
-            var regionCode = GetRegionCodeForNumber(number);
-            return IsValidNumberForRegion(number, regionCode);
+            // Inlined to share the national significant number string between region lookup and
+            // validation in the case where the country calling code maps to multiple regions
+            // (e.g. NANPA). For single-region calling codes the NSN is only computed once anyway.
+            countryCallingCodeToRegionCodeMap.TryGetValue(number.CountryCode, out List<string> regions);
+            if (regions == null)
+                return IsValidNumberForRegion(number, null, null);
+
+            string regionCode;
+            string nationalSignificantNumber = null;
+            if (regions.Count == 1)
+            {
+                regionCode = regions[0];
+            }
+            else
+            {
+                nationalSignificantNumber = GetNationalSignificantNumber(number);
+                regionCode = GetRegionCodeForNumberFromRegionList(number, regions, nationalSignificantNumber);
+            }
+            return IsValidNumberForRegion(number, regionCode, nationalSignificantNumber);
         }
 
         /// <summary>
@@ -1795,6 +1812,11 @@ namespace PhoneNumbers
         /// <param name="regionCode">The region that we want to validate the phone number for.</param>
         /// <returns>A bool that indicates whether the number is of a valid pattern.</returns>
         public bool IsValidNumberForRegion(PhoneNumber number, string regionCode)
+            => IsValidNumberForRegion(number, regionCode, null);
+
+        // Same as the public overload, but accepts a pre-computed national significant number to avoid
+        // re-allocating it when the caller already has it in hand.
+        private bool IsValidNumberForRegion(PhoneNumber number, string regionCode, string nationalSignificantNumber)
         {
             var countryCode = number.CountryCode;
             var metadata = GetMetadataForRegionOrCallingCode(countryCode, regionCode);
@@ -1815,7 +1837,7 @@ namespace PhoneNumbers
                 var numberLength = GetNationalSignificantNumberLength(number);
                 return numberLength > MIN_LENGTH_FOR_NSN && numberLength <= MAX_LENGTH_FOR_NSN;
             }
-            return GetNumberTypeHelper(GetNationalSignificantNumber(number), metadata) != PhoneNumberType.UNKNOWN;
+            return GetNumberTypeHelper(nationalSignificantNumber ?? GetNationalSignificantNumber(number), metadata) != PhoneNumberType.UNKNOWN;
         }
 
         /// <summary>
@@ -1837,8 +1859,11 @@ namespace PhoneNumbers
 
         private string GetRegionCodeForNumberFromRegionList(PhoneNumber number,
             List<string> regionCodes)
+            => GetRegionCodeForNumberFromRegionList(number, regionCodes, GetNationalSignificantNumber(number));
+
+        private string GetRegionCodeForNumberFromRegionList(PhoneNumber number,
+            List<string> regionCodes, string nationalNumber)
         {
-            var nationalNumber = GetNationalSignificantNumber(number);
             foreach (var regionCode in regionCodes)
             {
                 // If leadingDigits is present, use this. Otherwise, do full validation.
