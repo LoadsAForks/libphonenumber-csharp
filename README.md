@@ -101,6 +101,20 @@ Returns a `List<string>` of [IANA time zone identifiers](https://www.iana.org/ti
 
 Use `GetTimeZonesForGeographicalNumber` instead if you have already validated the number and want to skip the internal type check.
 
+### Get the carrier name for a phone number
+```csharp
+using PhoneNumbers;
+
+var phoneNumberUtil = PhoneNumberUtil.GetInstance();
+var carrierMapper = PhoneNumberToCarrierMapper.GetInstance();
+var phoneNumber = phoneNumberUtil.Parse("+917503397672", null);
+var carrierName = carrierMapper.GetNameForNumber(phoneNumber, Locale.English);
+
+Console.WriteLine(carrierName); // Aircel
+```
+
+> **Note:** Carrier data reflects the original network allocation. If the country supports mobile number portability, the number may have since moved to a different carrier. Use `GetSafeDisplayName` to return an empty string in those regions.
+
 ## Features
 
 * Parsing/formatting/validating phone numbers for all countries/regions of the world.
@@ -110,6 +124,7 @@ Use `GetTimeZonesForGeographicalNumber` instead if you have already validated th
 * IsPossibleNumber - quickly guessing whether a number is a possible phone number by using only the length information, much faster than a full validation.
 * AsYouTypeFormatter - formats phone numbers on-the-fly when users enter each digit.
 * FindNumbers - finds numbers in text input
+* PhoneNumberToCarrierMapper - looks up the carrier name originally assigned to a mobile or pager number, with locale-aware output and a safe-display mode for regions with mobile number portability.
 
 See [PhoneNumberUtil.cs](csharp/PhoneNumbers/PhoneNumberUtil.cs) for the various methods and properties available.
 
@@ -124,7 +139,6 @@ For more information on metadata usage, please refer to the [main repository faq
 
 ## ToDo
 
-* port read / write source xml data to binary for better performance and smaller .nupkg size (WIP)
 * update / add / port new unit tests and logging from java source
 
 ## How to unfold automatic generated files
@@ -135,21 +149,8 @@ For more information on metadata usage, please refer to the [main repository faq
 
 ## Running tests locally
 
-To run tests locally, you will need a zip version of the `geocoding.zip` file stored in the `resources` folder
-and `testgeocoding.zip` file stored in the `resources/test` folder.
-
-On linux, you can run the following commands to generate the zip accordingly
-
 ```bash
-(cd resources/geocoding; zip -r ../../resources/geocoding.zip *)
-(cd resources/test/geocoding; zip -r ../../../resources/test/testgeocoding.zip *)
-```
-
-For windows, you can use the following powershell script
-
-```powershell
-Compress-Archive -Path "resources\geocoding\*" -DestinationPath "resources\geocoding.zip"
-Compress-Archive -Path "resources\test\geocoding\*" -DestinationPath "resources\test\testgeocoding.zip"
+dotnet test csharp/PhoneNumbers.sln
 ```
 
 ## Contributing

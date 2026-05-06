@@ -16,8 +16,6 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.x
-      # Geocoding/timezones are now packed into binary files at build time by
-      # PhoneNumbers.MetadataBuilder, so the legacy zip-creation step is gone.
       - name: Run tests
         run: dotnet test csharp/PhoneNumbers.sln --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
       - name: Upload coverage reports to Codecov

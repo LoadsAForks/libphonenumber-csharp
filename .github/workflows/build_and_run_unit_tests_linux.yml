@@ -15,8 +15,6 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.x
-      # Geocoding/timezones are now packed into binary files at build time by
-      # PhoneNumbers.MetadataBuilder, so the legacy zip-creation step is gone.
       - name: Restore dependencies
         run: dotnet restore
         working-directory: ./csharp

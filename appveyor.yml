@@ -24,10 +24,6 @@ branches:
     - main
 before_build:
   - dotnet restore csharp -s https://api.nuget.org/v3/index.json
-  # Geocoding/timezone metadata is now compiled into per-region binaries by
-  # PhoneNumbers.MetadataBuilder during `dotnet pack`/`dotnet build`. The Compress-Archive
-  # steps that used to package resources/geocoding into a zip have been removed because
-  # the runtime no longer reads zip files.
 build_script:
   - dotnet pack -c Release csharp\PhoneNumbers
   - dotnet pack -c Release csharp\PhoneNumbers.Extensions
